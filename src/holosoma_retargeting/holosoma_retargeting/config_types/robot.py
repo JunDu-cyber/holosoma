@@ -19,6 +19,7 @@ class RobotDefaults(TypedDict):
 _ROBOT_DEFAULTS: dict[str, RobotDefaults] = {
     "g1": {"robot_dof": 29, "robot_height": 1.32, "object_name": "ground"},
     "t1": {"robot_dof": 23, "robot_height": 1.2, "object_name": "ground"},
+    "n2": {"robot_dof": 18, "robot_height": 1.14, "object_name": "ground"},
 }
 
 
@@ -155,6 +156,13 @@ class RobotConfig:
                 "left_foot_sphere_5_link",
                 "right_foot_sphere_5_link",
             ]
+        if self.robot_type == "n2":
+            return [
+                "left_sole_link",
+                "right_sole_link",
+                "left_toe_link",
+                "right_toe_link",
+            ]
         raise ValueError(f"Invalid robot type: {self.robot_type}")
 
     FOOT_STICKING_LINKS = property(
@@ -233,6 +241,8 @@ class RobotConfig:
             return np.arange(19)
         if self.robot_type == "t1":
             return np.concatenate([np.arange(7), np.arange(11, 23)])
+        if self.robot_type == "n2":
+            return np.arange(18)  # all joints tracked for n2
         # Default: return empty array if robot type not defined (nominal tracking not used)
         return np.array([], dtype=int)
 
