@@ -200,9 +200,12 @@ class RobotConfig:
             base.update(
                 {
                     # Allow the left shoulder to adduct slightly past the arm-at-side
-                    # pose: the uniformly scaled human target is far narrower than N2's
-                    # shoulders, and without this the roll joint pins at 0 for most of
-                    # every upper-body motion (full-qpos index 8 = q_a slice 1).
+                    # pose: the uniformly scaled human target is far narrower than
+                    # N2's shoulders, and without this the roll joint pins at 0 for
+                    # most of every upper-body motion.
+                    # NOTE the N2 XML joint order is L_arm(0-3), L_leg(4-8),
+                    # R_arm(9-12), R_leg(13-17); full-qpos index = 7 + slice index.
+                    # L_arm_shoulder_roll = slice 1 -> qpos 8.
                     "8": -0.35,  # L_arm_shoulder_roll_joint lower bound (was 0.0)
                 }
             )
@@ -235,9 +238,9 @@ class RobotConfig:
         elif self.robot_type == "n2":
             base.update(
                 {
-                    # Mirror of the left-shoulder adduction allowance
-                    # (full-qpos index 12 = q_a slice 5).
-                    "12": 0.35,  # R_arm_shoulder_roll_joint upper bound (was 0.0)
+                    # Mirror of the left-shoulder adduction allowance.
+                    # N2 XML order: R_arm_shoulder_roll = slice 10 -> qpos 17.
+                    "17": 0.35,  # R_arm_shoulder_roll_joint upper bound (was 0.0)
                 }
             )
 
