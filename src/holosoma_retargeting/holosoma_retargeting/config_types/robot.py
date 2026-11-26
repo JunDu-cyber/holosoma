@@ -19,7 +19,13 @@ class RobotDefaults(TypedDict):
 _ROBOT_DEFAULTS: dict[str, RobotDefaults] = {
     "g1": {"robot_dof": 29, "robot_height": 1.32, "object_name": "ground"},
     "t1": {"robot_dof": 23, "robot_height": 1.2, "object_name": "ground"},
-    "n2": {"robot_dof": 18, "robot_height": 1.14, "object_name": "ground"},
+    # robot_height is consumed as a uniform scale factor (smpl_scale = robot_height /
+    # subject_height), not as a physical dimension. 1.219 is the zero-pose straight-leg
+    # standing height of the MuJoCo model (top geom, feet on z=0); Noetix's datasheet
+    # quotes 1.14 m nominal stance. The same convention gap exists for G1 (official
+    # 1.32 m vs 1.424 m straight-leg). Empirically on OMOMO sub3_largebox_003:
+    # 1.14 -> cost 0.467, 1.219 -> 0.388, 1.295 (limb-matched) -> 0.428. Keep 1.219.
+    "n2": {"robot_dof": 18, "robot_height": 1.219, "object_name": "ground"},
 }
 
 
@@ -190,6 +196,16 @@ class RobotConfig:
                     "35": -0.05,
                 }
             )
+        elif self.robot_type == "n2":
+            base.update(
+                {
+                    # Allow the left shoulder to adduct slightly past the arm-at-side
+                    # pose: the uniformly scaled human target is far narrower than N2's
+                    # shoulders, and without this the roll joint pins at 0 for most of
+                    # every upper-body motion (full-qpos index 8 = q_a slice 1).
+                    "8": -0.35,  # L_arm_shoulder_roll_joint lower bound (was 0.0)
+                }
+            )
 
         return base
 
@@ -214,6 +230,14 @@ class RobotConfig:
                     "33": 0.2,  # left wrist
                     "34": 0.3,
                     "35": 0.05,
+                }
+            )
+        elif self.robot_type == "n2":
+            base.update(
+                {
+                    # Mirror of the left-shoulder adduction allowance
+                    # (full-qpos index 12 = q_a slice 5).
+                    "12": 0.35,  # R_arm_shoulder_roll_joint upper bound (was 0.0)
                 }
             )
 
