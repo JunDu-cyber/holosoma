@@ -1,0 +1,14 @@
+<mujocoinclude>
+    <body name="multi_boxes_box1_link" pos="0 0 0" quat="0.999845 0.000000 0.000000 -0.017593">
+        <geom name="multi_boxes_link_1" type="mesh" mesh="box1" pos="0 0 0" quat="1 0 0 0" contype="1" conaffinity="1"/>
+    </body>
+    <body name="multi_boxes_box2_link" pos="0 0 0" quat="0.999845 0.000000 0.000000 -0.017593">
+        <geom name="multi_boxes_link_2" type="mesh" mesh="box2" pos="0 0 0" quat="1 0 0 0" contype="1" conaffinity="1"/>
+    </body>
+    <body name="multi_boxes_box3_link" pos="0 0 0" quat="0.999845 0.000000 0.000000 -0.017593">
+        <geom name="multi_boxes_link_3" type="mesh" mesh="box3" pos="0 0 0" quat="1 0 0 0" contype="1" conaffinity="1"/>
+    </body>
+    <body name="multi_boxes_box4_link" pos="0 0 0" quat="0.999845 0.000000 0.000000 -0.017593">
+        <geom name="multi_boxes_link_4" type="mesh" mesh="box4" pos="0 0 0" quat="1 0 0 0" contype="1" conaffinity="1"/>
+    </body>
+</mujocoinclude>

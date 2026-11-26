@@ -1,0 +1,374 @@
+{
+  "terrain": {
+    "boxes": [
+      {
+        "pos": [
+          0.5896477385510772,
+          0.011010494057020143,
+          0.08499999999999994
+        ],
+        "size": [
+          0.34052892897837467,
+          0.5,
+          0.08499999999999994
+        ],
+        "yaw": -0.03518824193981942,
+        "pitch": 0.0,
+        "name": "terrain_box_0"
+      },
+      {
+        "pos": [
+          1.0797802105062255,
+          -0.00624352791777269,
+          0.16999999999999998
+        ],
+        "size": [
+          0.14990714365410507,
+          0.5,
+          0.16999999999999998
+        ],
+        "yaw": -0.03518824193981942,
+        "pitch": 0.0,
+        "name": "terrain_box_1"
+      },
+      {
+        "pos": [
+          1.3794089000866587,
+          -0.01679128855415073,
+          0.255
+        ],
+        "size": [
+          0.14990714365410512,
+          0.5,
+          0.255
+        ],
+        "yaw": -0.03518824193981942,
+        "pitch": 0.0,
+        "name": "terrain_box_2"
+      },
+      {
+        "pos": [
+          1.7772239119213584,
+          -0.03079547996941874,
+          0.3400000000000001
+        ],
+        "size": [
+          0.24815428504533277,
+          0.5,
+          0.3400000000000001
+        ],
+        "yaw": -0.03518824193981942,
+        "pitch": 0.0,
+        "name": "terrain_box_3"
+      }
+    ],
+    "provenance": {
+      "source": "fit_terrain_from_motion",
+      "n_frames": 159,
+      "fps": 30.0,
+      "stance_speed": 0.3,
+      "free_space_tol": 0.03,
+      "use_free_space_evidence": true,
+      "contact_margin": [
+        0.1,
+        0.05
+      ],
+      "max_extension": [
+        0.0,
+        0.15
+      ],
+      "joint_offsets_source": "motion",
+      "stance_timing_source": "kinematic",
+      "seat_height_source": "fixed_pelvis_offset",
+      "joint_surface_offsets_m": {
+        "R_Toe": 0.02,
+        "R_Ankle": 0.07,
+        "L_Ankle": 0.07,
+        "L_Toe": 0.02
+      },
+      "model": "stair_flight",
+      "n_seats": 0
+    }
+  },
+  "report": {
+    "n_frames": 159,
+    "n_stance_events": 20,
+    "n_family_evidence_events": 20,
+    "n_levels": 5,
+    "free_space_tol": 0.03,
+    "use_free_space_evidence": true,
+    "warnings": [
+      "level 2 box 0: free space (-inf, 0.247) is tighter than the contact footprint (-0.261, 0.261); clamped to free space, so a footfall may overhang the edge",
+      "level 3 box 0: free space (-inf, 0.247) is tighter than the contact footprint (-0.261, 0.261); clamped to free space, so a footfall may overhang the edge",
+      "level 4 box 0: free space (-0.205, inf) is tighter than the contact footprint (-0.214, 0.311); clamped to free space, so a footfall may overhang the edge"
+    ],
+    "joint_offsets_source": "motion",
+    "stance_timing_source": "kinematic",
+    "seat": {
+      "mode": "off",
+      "n_rests": 0,
+      "seats": [],
+      "warnings": [],
+      "n_seated_contacts_dropped": 0,
+      "pelvis_offset": 0.16
+    },
+    "n_seats": 0,
+    "joint_offsets": {
+      "R_Toe": 0.02,
+      "R_Ankle": 0.07,
+      "L_Ankle": 0.07,
+      "L_Toe": 0.02
+    },
+    "pelvis_seat_offset": 0.16,
+    "ground_level": {
+      "n_events": 4,
+      "mean_z_by_joint": {
+        "L_Ankle": 0.07,
+        "L_Toe": 0.02,
+        "R_Ankle": 0.07,
+        "R_Toe": 0.02
+      },
+      "observed_floor": true,
+      "height": 0.0
+    },
+    "family_evidence": {
+      "family": "steps",
+      "model": "physical_surface",
+      "reason": "footfall profile residual (neutral surface-normal calibration unavailable)",
+      "family_evidence_mode": "physical",
+      "neutral_source": "unavailable",
+      "neutral_foot_pitch_deg": null,
+      "surface_normal_family": null,
+      "surface_normal_margin_deg": null,
+      "surface_normal_step_error_deg": null,
+      "surface_normal_ramp_error_deg": null,
+      "surface_normal_n_intervals": 0,
+      "surface_normal_slope_deg": null,
+      "swing_clearance_ascent_n": 8,
+      "swing_clearance_ascent_q25": 2.5053763440860197,
+      "swing_clearance_ascent_mid": 2.420346568023204,
+      "swing_clearance_ascent_q75": 1.5268817204301068,
+      "swing_clearance_descent_n": 0,
+      "swing_clearance_descent_q25": null,
+      "swing_clearance_descent_mid": null,
+      "swing_clearance_descent_q75": null,
+      "swing_clearance_family": "steps",
+      "swing_clearance_margin": 1.920346568023204,
+      "swing_clearance_direction": "ascent",
+      "swing_clearance_n": 8
+    },
+    "ramp": {
+      "model": "ramp",
+      "n_events": 20,
+      "yaw": 0.01119122092199221,
+      "origin_xy": [
+        0.938,
+        -1.3877787807814458e-18
+      ],
+      "u0": -0.47904157386050206,
+      "u1": 0.8009584261394991,
+      "slope_deg": 29.021343315350528,
+      "rise": 0.7101390341036882,
+      "length": 1.2800000000000011,
+      "profile_rms": 0.03315887420446988,
+      "profile_max": 0.051583155793282875,
+      "lateral_spread": 0.11384818019496958,
+      "n_footfalls_on_incline": 15,
+      "u_max": 0.8730644931682014,
+      "largest_unsampled_gap": 0.18994050999367823,
+      "profile_joint_offsets": {
+        "L_Toe": -0.009274803929279873,
+        "R_Toe": -0.009274803929279873,
+        "L_Ankle": 0.09885805383523344,
+        "R_Ankle": 0.09885805383523344
+      },
+      "profile_joint_offsets_fixed": false,
+      "profile_surface_datum": 0.0,
+      "contact_profile_rms": 0.043505986266070135,
+      "slope_source": "footfalls",
+      "motion_foot_span_u": [
+        -1.239041573860503,
+        0.8730644931682014
+      ],
+      "landing_extent_source": "full_motion_foot_landmarks",
+      "width": 0.5,
+      "support_width": 0.15884818019496957,
+      "n_blocking": 0,
+      "landing_span": [
+        0.8009584261394991,
+        1.0930644931682014
+      ],
+      "profile_candidate_available": true,
+      "rejected": "independent surface-normal and swing-clearance evidence favors discrete support"
+    },
+    "accepted_levels": [
+      true,
+      true,
+      true,
+      true,
+      true
+    ],
+    "stair_support_constraints": {
+      "source": "all motion-derived stance heights",
+      "target_counts": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "reassigned": []
+    },
+    "stair_flight": {
+      "model": "stair_flight",
+      "yaw": -0.03518824193981942,
+      "heights": [
+        -2.1034319994076653e-16,
+        0.16999999999999987,
+        0.33999999999999997,
+        0.51,
+        0.6800000000000002
+      ],
+      "height_model": {
+        "model": "shared_riser_least_squares",
+        "accepted": true,
+        "raw_heights": [
+          0.0,
+          0.17,
+          0.34,
+          0.51,
+          0.68
+        ],
+        "fitted_heights": [
+          -2.1034319994076653e-16,
+          0.16999999999999987,
+          0.33999999999999997,
+          0.51,
+          0.6800000000000002
+        ],
+        "effective_heights": [
+          -2.1034319994076653e-16,
+          0.16999999999999987,
+          0.33999999999999997,
+          0.51,
+          0.6800000000000002
+        ],
+        "shared_riser": 0.1700000000000001,
+        "max_abs_adjustment": 2.1034319994076653e-16,
+        "max_abs_applied_adjustment": 2.1034319994076653e-16,
+        "rms_adjustment": 1.256272269536278e-16,
+        "max_adjustment": 0.03,
+        "regularization_blend": 1.0,
+        "support_tolerance": 0.05,
+        "support_safety_margin": 1e-06,
+        "feasible_blend_interval": [
+          0.0,
+          1.0
+        ],
+        "support_residual_max_raw": 1.1102230246251565e-16,
+        "support_residual_max_fitted": 2.220446049250313e-16,
+        "support_residual_max_effective": 2.220446049250313e-16,
+        "evidence": "ordered motion-derived support levels only",
+        "support_target_counts": [
+          4,
+          4,
+          4,
+          4,
+          4
+        ]
+      },
+      "spans": [
+        [
+          -1.4556497440999907,
+          -0.6839509260294141
+        ],
+        [
+          -0.6839509260294141,
+          -0.0028930680726647687
+        ],
+        [
+          -0.0028930680726647687,
+          0.2969212192355454
+        ],
+        [
+          0.2969212192355454,
+          0.5967355065437556
+        ],
+        [
+          0.5967355065437556,
+          1.0930440766344212
+        ]
+      ],
+      "level_centres_u": [
+        -1.162174978997744,
+        -0.15280021172676986,
+        0.14701407558144036,
+        0.44682836288965055,
+        0.7466426501978606
+      ],
+      "level_support_spans_u": [
+        [
+          -1.3556497440999906,
+          -0.9687002138954978
+        ],
+        [
+          -0.3992016381633303,
+          0.09360121470979058
+        ],
+        [
+          -0.09938735085512011,
+          0.3934155020180007
+        ],
+        [
+          0.20042693645309,
+          0.6932297893262112
+        ],
+        [
+          0.5002412237613,
+          0.9930440766344211
+        ]
+      ],
+      "motion_foot_span_u": [
+        -1.2356497440999905,
+        0.8730440766344211
+      ],
+      "terminal_motion_foot_spans_u": {
+        "first": [
+          -1.2356497440999905,
+          -1.0887002138954978
+        ],
+        "last": [
+          0.6202412237613,
+          0.8730440766344211
+        ]
+      },
+      "terminal_motion_foot_counts": {
+        "first": 4,
+        "last": 4
+      },
+      "landing_extent_source": "clip_boundary_paired_foot_landmarks",
+      "width": 0.5,
+      "support_width": 0.18724045372818832,
+      "n_blocking": 0,
+      "misassigned": 0,
+      "misassigned_frames": 0,
+      "n_levels": 5
+    },
+    "n_buried_boxes": 0,
+    "model_scores": {
+      "per_level": {
+        "raised_contact_error_max": 5.551115123125783e-17,
+        "max_penetration": 0.0,
+        "passed": true
+      },
+      "stair_flight": {
+        "raised_contact_error_max": 1.6653345369377348e-16,
+        "max_penetration": 0.0,
+        "passed": true
+      }
+    },
+    "model": "stair_flight"
+  },
+  "provenance": "holosoma_retargeting.src.terrain_reconstruction (vendored TERRA @db9d0d6)",
+  "source_motion": "synthetic_lafan_stairs.npy"
+}

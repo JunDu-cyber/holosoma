@@ -150,8 +150,8 @@ def validate_config(cfg: RetargetingConfig) -> None:
         )
 
     # Task-specific format requirements
-    if cfg.task_type == "climbing" and cfg.data_format not in (None, "mocap"):
-        raise ValueError("Climbing task requires 'mocap' data format")
+    if cfg.task_type == "climbing" and cfg.data_format not in (None, "mocap", "lafan"):
+        raise ValueError("Climbing task requires 'mocap' or 'lafan' data format")
     if cfg.task_type == "object_interaction" and cfg.data_format not in (None, "smplh"):
         raise ValueError("Object interaction requires 'smplh' data format")
     # robot_only accepts any format in the registry (already validated above)
@@ -268,13 +268,18 @@ def load_motion_data(
             raise FileNotFoundError(f"No .npy file found in {task_dir}")
 
         npy_file = npy_files[0]
-        # MOCAP-specific downsample factor
-        downsample = 4
+        # MOCAP sources are 120 Hz and are brought to 30 Hz here; LAFAN is
+        # natively 30 Hz and must not be downsampled.
+        downsample = 4 if data_format == "mocap" else 1
         human_joints = np.load(str(npy_file))[::downsample]
         num_frames = human_joints.shape[0]
         object_poses = np.tile(np.array([[1, 0, 0, 0, 0, 0, 0]]), (num_frames, 1))
         default_human_height = motion_data_config.default_human_height or 1.78
         smpl_scale = constants.ROBOT_HEIGHT / default_human_height
+        # Climbing loads raw y-up sources for lafan (mirrors load_motion_data's
+        # robot_only branch); mocap npy files are already z-up.
+        if data_format == "lafan":
+            human_joints = transform_y_up_to_z_up(human_joints)
 
     logger.debug(
         "Loaded %d frames, scale factor: %.4f",
@@ -338,16 +343,47 @@ def setup_object_data(
 
         np.random.seed(0)
         print("object mesh file: ", constants.OBJECT_MESH_FILE)
-        object_local_pts, object_local_pts_demo_original = load_object_data(
-            constants.OBJECT_MESH_FILE,
-            smpl_scale=smpl_scale,
-            surface_weights=lambda p: (
-                task_config.surface_weight_high
-                if p[2] > task_config.surface_weight_threshold
-                else task_config.surface_weight_low
-            ),
-            sample_count=100,
-        )
+
+        terrain_json = object_dir / "terrain.json"
+        if terrain_json.exists():
+            # Terrain reconstructed by the vendored TERRA core (see
+            # examples/build_climbing_assets.py): sample the interaction-mesh
+            # points with the exact TERRA recipe (box-top grids at mesh_spacing
+            # plus a floor grid with the box footprints removed), which is
+            # correct for any tread height - unlike the z-threshold heuristic
+            # below, which only suits ~1 m parkour boxes.
+            import json as _json
+
+            from holosoma_retargeting.src.terrain_reconstruction import TerrainSpec
+
+            with open(terrain_json) as f:
+                spec = TerrainSpec.from_dict(_json.load(f)["terrain"])
+            walkable = spec.walkable
+            mesh_spacing = 0.20
+            pts = walkable.surface_points(
+                spacing=mesh_spacing,
+                ground_range=task_config.climbing_ground_range,
+                ground_size=task_config.climbing_ground_size,
+            )
+            # Robot world: the interaction mesh pairs these points with the
+            # SCALED human joints (mirrors load_object_data's points_scaled),
+            # so they must carry smpl_scale like every other mesh vertex.
+            object_local_pts_demo_original = pts * smpl_scale
+            print(
+                f"terrain.json: {len(spec.boxes)} boxes, "
+                f"{len(object_local_pts_demo_original)} surface points (TERRA recipe)"
+            )
+        else:
+            object_local_pts, object_local_pts_demo_original = load_object_data(
+                constants.OBJECT_MESH_FILE,
+                smpl_scale=smpl_scale,
+                surface_weights=lambda p: (
+                    task_config.surface_weight_high
+                    if p[2] > task_config.surface_weight_threshold
+                    else task_config.surface_weight_low
+                ),
+                sample_count=100,
+            )
 
         if augmentation:
             ground_pts = create_ground_points(
@@ -359,7 +395,7 @@ def setup_object_data(
         else:
             object_scale = object_scale_normal
             object_local_pts_demo = object_local_pts_demo_original
-            object_local_pts = object_local_pts_demo
+            object_local_pts = object_scale * object_local_pts_demo
 
         # Create scaled URDF and XML files
         scale_factors = tuple(float(value) for value in (object_scale * smpl_scale))
@@ -470,6 +506,7 @@ def build_retargeter_kwargs_from_config(
         "activate_foot_sticking": retargeter_config.activate_foot_sticking,
         "foot_lock": retargeter_config.foot_lock,
         "penetration_tolerance": retargeter_config.penetration_tolerance,
+        "penetration_recovery_cap": retargeter_config.penetration_recovery_cap,
         "foot_sticking_tolerance": retargeter_config.foot_sticking_tolerance,
         "self_collision": retargeter_config.self_collision,
         "step_size": retargeter_config.step_size,
@@ -693,13 +730,19 @@ def main(cfg: RetargetingConfig) -> None:
     # Extract foot sticking sequences
     foot_sticking_sequences = extract_foot_sticking_sequence_velocity(human_joints, retargeter.demo_joints, toe_names)
 
-    # Auto foot lock: pin the sole/toe links' Z to the floor during every
-    # detected human stance interval (see auto_foot_lock_from_stance).
+    # Auto foot lock: anchor the sole/toe links' Z at the observed human contact
+    # height during every detected stance interval (see auto_foot_lock_from_stance).
     if cfg.retargeter.foot_lock.auto_from_stance:
+        toe_idx = [retargeter.demo_joints.index(name) for name in toe_names]
+        foot_z = {
+            name: human_joints[:, idx, 2]
+            for name, idx in zip(toe_names, toe_idx)
+        }
         retargeter.auto_foot_lock_from_stance(
             foot_sticking_sequences,
-            z_floor=0.0,
+            z_floor=None,
             min_frames=cfg.retargeter.foot_lock.auto_min_frames,
+            foot_z_by_frame=foot_z,
         )
         n_left = sum(e - s + 1 for s, e in retargeter._foot_lock_windows["left"])
         n_right = sum(e - s + 1 for s, e in retargeter._foot_lock_windows["right"])

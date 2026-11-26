@@ -54,6 +54,7 @@ class InteractionMeshRetargeter:
         step_size: float = 0.2,
         collision_detection_threshold: float = 0.1,
         penetration_tolerance: float = 1e-3,
+        penetration_recovery_cap: float = 1e-2,
         foot_sticking_tolerance: float = 1e-3,
         foot_lock: FootLockConfig | None = None,
         self_collision: SelfCollisionConfig | None = None,
@@ -95,6 +96,7 @@ class InteractionMeshRetargeter:
             zip(task_constants.FOOT_STICKING_LINKS, task_constants.FOOT_STICKING_LINKS, strict=False)
         )
         self.penetration_tolerance = penetration_tolerance
+        self.penetration_recovery_cap = penetration_recovery_cap
         self.step_size = step_size
         self.visualize = visualize
         self.debug = debug
@@ -173,6 +175,7 @@ class InteractionMeshRetargeter:
         self.w_nominal_tracking_init = w_nominal_tracking_init
         self.nominal_tracking_tau = nominal_tracking_tau
         self.track_nominal_indices = task_constants.NOMINAL_TRACKING_INDICES
+        self.infeasible_holds = 0
 
     def _init_foot_lock(self, foot_lock: FootLockConfig | None) -> None:
         """Initialize foot lock configuration and normalize window mappings."""
@@ -211,25 +214,33 @@ class InteractionMeshRetargeter:
     def auto_foot_lock_from_stance(
         self,
         foot_sticking_sequences: list[dict[str, bool]],
-        z_floor: float = 0.0,
+        z_floor: float | None = None,
         min_frames: int = 3,
+        foot_z_by_frame: dict[str, np.ndarray] | None = None,
     ) -> None:
         """Populate foot-lock windows from the detected human stance sequence.
 
         Every contiguous stance interval of at least ``min_frames`` frames
-        becomes a Z-pinning window for that side's sole/toe links, anchored at
-        ``z_floor``. This keeps the foot sole on the ground when the leg chain
-        cannot lower the ankle landmark to its mesh target (robots whose limb
-        proportions exceed the uniformly scaled human's), which otherwise shows
-        up as standing on tiptoe: the heel is unobserved by the objective, so
-        the rigid foot pitches plantar while chasing the toe target.
+        becomes a Z-anchoring window for that side's sole/toe links. This keeps
+        the foot sole planted while the leg chain cannot lower the ankle
+        landmark to its mesh target (robots whose limb proportions exceed the
+        uniformly scaled human's), which otherwise shows up as standing on
+        tiptoe: the heel is unobserved by the objective, so the rigid foot
+        pitches plantar while chasing the toe target.
 
         Args:
             foot_sticking_sequences: Per-frame dicts with one left* and one
                 right* key (e.g. ``{"L_Toe": bool, "R_Toe": bool}``), as
                 produced by ``extract_foot_sticking_sequence_velocity``.
-            z_floor: World z the sole/toe links are pinned to during stance.
+            z_floor: World z the sole/toe links are anchored to. Ignored when
+                ``foot_z_by_frame`` is given; pass ``None`` together with
+                ``foot_z_by_frame`` to anchor at the observed contact height.
             min_frames: Minimum stance-interval length to become a window.
+            foot_z_by_frame: Optional per-side scaled-human toe heights,
+                ``{left_key: (T,), right_key: (T,)}``; each window is then
+                anchored at the *median human contact height* of that interval,
+                which is what makes the anchor correct on non-flat terrain
+                (stairs/ramps) instead of assuming a floor at z=0.
         """
         if not foot_sticking_sequences:
             return
@@ -241,13 +252,14 @@ class InteractionMeshRetargeter:
         self.foot_lock = FootLockConfig(
             enable=True,
             windows=None,
-            z_floor=float(z_floor),
+            z_floor=float(z_floor if z_floor is not None else 0.0),
             tolerance=self.foot_lock.tolerance,
             soft=True,
             soft_weight=self.foot_lock.soft_weight,
         )
         for side, key in (("left", left_key), ("right", right_key)):
             flags = np.array([bool(seq[key]) for seq in foot_sticking_sequences], dtype=bool)
+            z_series = foot_z_by_frame.get(key) if foot_z_by_frame is not None else None
             windows: list[tuple[int, int]] = []
             z_floors: list[float] = []
             i = 0
@@ -258,7 +270,10 @@ class InteractionMeshRetargeter:
                         j += 1
                     if j - i >= min_frames:
                         windows.append((i, j - 1))
-                        z_floors.append(float(z_floor))
+                        if z_series is not None:
+                            z_floors.append(float(np.median(z_series[i:j])))
+                        else:
+                            z_floors.append(float(self.foot_lock.z_floor))
                     i = j
                 else:
                     i += 1
@@ -762,12 +777,17 @@ class InteractionMeshRetargeter:
                             Jz @ dqa <= z_delta + self.foot_lock.tolerance,
                         ]
 
-        # Non-penetration constraints
+        # Non-penetration constraints. The demand is capped at
+        # penetration_recovery_cap per iteration (TERRA's rho): without the cap
+        # a deeply penetrating configuration must exit in a single QP step,
+        # which conflicts with the trust region and turns the problem
+        # infeasible; with it the exit is gradual over successive iterations.
         Js, phis = self._update_jacobians_and_phis_from_q(q)
         for key, phi in phis.items():
             Ja_n_full = Js[key]
             Ja_n = Ja_n_full[self.q_a_indices]
             rhs = -phi - self.penetration_tolerance
+            rhs = min(rhs, self.penetration_recovery_cap)
             constraints += [Ja_n @ dqa >= rhs]
 
         # Self-collision constraints
@@ -826,13 +846,25 @@ class InteractionMeshRetargeter:
         # -------- Solve with Clarabel --------
         solver_kwargs = {"verbose": verbose}
         problem.solve(solver=cp.CLARABEL, **solver_kwargs)
-        if (problem.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE)) and init_t:
-            constraints = [c for c in constraints if not isinstance(c, cp.constraints.second_order.SOC)]
+        if problem.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
+            # The trust region (SOC) can make the linearized problem infeasible
+            # when the current configuration is cornered against joint limits
+            # and contact constraints; retry without it (the original code did
+            # this only for the first frame).
+            constraints = [c for c in constraints if not isinstance(c, cp.SOC)]
             problem = cp.Problem(cp.Minimize(cp.sum(obj_terms)), constraints)
             problem.solve(solver=cp.CLARABEL, **solver_kwargs)
 
         if problem.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
-            raise RuntimeError(f"CVXPY solve failed: {problem.status}")
+            self._dump_infeasibility(q, dqa, constraints, frame_idx, init_t)
+            self.infeasible_holds += 1
+            print(
+                f"[WARN] frame {frame_idx}: QP infeasible even without the trust "
+                f"region; holding the current configuration (total holds: "
+                f"{self.infeasible_holds}). The reference demands more than the "
+                f"robot can reach here."
+            )
+            return np.copy(q), np.inf
 
         dqa_star = dqa.value
         cost = problem.value
@@ -842,6 +874,30 @@ class InteractionMeshRetargeter:
         q_star[3:7] /= np.linalg.norm(q_star[3:7]) + 1e-12
 
         return q_star, cost
+
+    def _dump_infeasibility(self, q, dqa, constraints, frame_idx: int, init_t: bool) -> None:
+        """On QP infeasibility, print which hard-constraint family is cornered."""
+        try:
+            m = self.robot_model
+            Js, phis = self._update_jacobians_and_phis_from_q(q)
+            worst = sorted(phis.items(), key=lambda kv: kv[1])[:5]
+            print(f"\n[INFEASIBLE frame {frame_idx}] deepest geom pairs:")
+            for key, phi in worst:
+                a, b = key
+                na = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_GEOM, a)
+                nb = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_GEOM, b)
+                print(f"    phi {phi:+.4f}  ({a},{b}) {na} <-> {nb}")
+            q_a = q[self.q_a_indices]
+            at_lb = np.where(q_a <= self.q_a_lb + 1e-3)[0]
+            at_ub = np.where(q_a >= self.q_a_ub - 1e-3)[0]
+            joint_names = [m.joint(i).name for i in range(m.njnt) if m.joint(i).name]
+            at_lb = [int(i) for i in at_lb if i >= 7]
+            at_ub = [int(i) for i in at_ub if i >= 7]
+            if at_lb or at_ub:
+                print("    joints at lower bounds:", [joint_names[i - 7] for i in at_lb])
+                print("    joints at upper bounds:", [joint_names[i - 7] for i in at_ub])
+        except Exception as exc:  # noqa: BLE001 - diagnostics must not mask the original error
+            print(f"[INFEASIBLE frame {frame_idx}] (diagnostic dump failed: {exc})")
 
     def _is_foot_locked_in_window(self, foot_link_key: str, frame_idx: int) -> float | None:
         """Return z_floor if foot is locked at this frame, else None."""

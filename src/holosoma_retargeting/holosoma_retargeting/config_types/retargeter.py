@@ -48,8 +48,13 @@ class FootLockConfig:
     TERRA's calcaneus anchor residual works). auto_from_stance enables this.
     """
 
-    soft_weight: float = 2000.0
-    """Weight of each soft foot-lock anchor residual."""
+    soft_weight: float = 1000.0
+    """Weight of each soft foot-lock anchor residual.
+
+    1000 fully plants flat-ground stance (anchors reachable); on terrain where
+    an anchor exceeds the robot's reach the residual persists, so lower it if
+    it visibly distorts the pose (TERRA's own anchor weight is 100).
+    """
 
 
 @dataclass(frozen=True)
@@ -94,6 +99,14 @@ class RetargeterConfig:
     """Whether to enforce foot sticking constraints."""
 
     penetration_tolerance: float = 0.001
+    """Tolerance for penetration when enforcing non-penetration constraints."""
+    penetration_recovery_cap: float = 0.01
+    """Maximum per-iteration exit demand of the non-penetration constraint.
+
+    A deeply penetrating configuration must exit gradually over successive
+    SQP iterations (TERRA's rho recovery cap); demanding the full exit in one
+    QP step conflicts with the trust region and turns the problem infeasible.
+    """
     """Tolerance for penetration when enforcing non-penetration constraints."""
 
     foot_sticking_tolerance: float = 1e-3
