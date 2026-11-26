@@ -9,10 +9,16 @@ Usage (from the holosoma_retargeting package root):
 
     python examples/view_raw_motion.py demo_data/OMOMO_new/sub3_largebox_003.pt
     python examples/view_raw_motion.py --npz demo_results/n2/robot_only/omomo/sub3_largebox_003.npz
-    python examples/view_raw_motion.py demo_data/OMOMO_new/sub3_largebox_003.pt --scale 0.65
+    python examples/view_raw_motion.py demo_data/OMOMO_new/sub3_largebox_003.pt --scale 0.63
 
 ``--scale`` applies the same uniform scaling the retargeter uses (robot_height /
 subject_height), so you can see the exact reference cloud the solver sees.
+
+Scene and GUI calls copy the repo's own proven viser usage verbatim
+(``interaction_mesh_retargeter.draw_keypoints`` for the joint spheres,
+``viser_player.py`` for the GUI): joints are drawn with
+``add_batched_meshes_simple`` and bones with the ``points``/``colors`` form of
+``add_line_segments``.
 """
 
 from __future__ import annotations
@@ -22,18 +28,8 @@ import time
 from pathlib import Path
 
 import numpy as np
+import trimesh
 import viser
-
-
-def load_joints(path: str, npz: bool) -> np.ndarray:
-    """Return (T, 52, 3) world-space SMPL-H joints."""
-    if npz:
-        return np.load(path)["human_joints"]
-    import torch
-
-    data = torch.load(path, map_location="cpu").detach().numpy()
-    return data[:, 162 : 162 + 52 * 3].reshape(-1, 52, 3)
-
 
 # SMPL-H joint order (matches DEMO_JOINTS_REGISTRY["smplh"]) and parent indices.
 NAMES = [
@@ -57,6 +53,24 @@ PARENT = np.array([
     35, 36, 37, 35, 39, 40, 35, 42, 43, 35, 45, 46, 35, 48, 49,
 ])
 BONES = [(p, c) for c, p in enumerate(PARENT) if p >= 0]
+BONE_COLOR = np.array([0.85, 0.85, 0.85])
+JOINT_COLOR = (51, 102, 255)  # int rgb, the convention draw_keypoints uses
+
+
+def load_joints(path: str, npz: bool) -> np.ndarray:
+    """Return (T, 52, 3) world-space SMPL-H joints."""
+    if npz:
+        return np.load(path)["human_joints"]
+    import torch
+
+    data = torch.load(path, map_location="cpu").detach().numpy()
+    return data[:, 162 : 162 + 52 * 3].reshape(-1, 52, 3)
+
+
+def bone_points(frame: np.ndarray, paired: bool) -> np.ndarray:
+    """Bone endpoints: ``(N, 2, 3)`` when paired else the flat ``(2N, 3)`` form."""
+    segs = np.array([[frame[p], frame[c]] for p, c in BONES])
+    return segs if paired else segs.reshape(-1, 3)
 
 
 def main() -> None:
@@ -73,41 +87,84 @@ def main() -> None:
     print(f"{T} frames, scale={scale:.3f}")
 
     server = viser.ViserServer(port=8082)
-    gui = server.gui.add_folder("raw human motion")
-    slider = gui.add_slider("frame", 0, T - 1, step=1, initial_value=0)
-    speed = gui.add_slider("playback speed", 0, 4, step=0.25, initial_value=1.0)
-    gui.add_button("pause/resume")
+    with server.gui.add_folder("raw human motion"):
+        slider = server.gui.add_slider("frame", 0, T - 1, step=1, initial_value=0)
+        speed = server.gui.add_slider("playback speed", 0, 4, step=0.25, initial_value=1.0)
+        pause_btn = server.gui.add_button("pause/resume")
 
-    pts = server.scene.add_point_cloud("joints", points=joints[0], point_size=0.02, color=(0.2, 0.4, 1.0))
-    lines = server.scene.add_line_segments(
-        "skeleton", np.array([[joints[0, p], joints[0, c]] for p, c in BONES]), line_width=2.0
-    )
-    server.scene.add_grid("ground", width=4, height=4)
+    server.scene.add_grid("/ground", width=4, height=4, position=(0.0, 0.0, 0.0))
+    sphere = trimesh.primitives.Sphere(radius=0.02)
+    handles: list = []
 
-    playing = True
-    prev_playing = playing
+    # viser releases disagree on add_line_segments' points shape: newer ones want
+    # (N, 2, 3), older ones (as in interaction_mesh_retargeter) want flat (2N, 3).
+    # Probe once and remember which form this install accepts.
+    paired_segments: bool | None = None
+
+    def add_skeleton(frame: int):
+        nonlocal paired_segments
+        if paired_segments is None:
+            try:
+                handle = server.scene.add_line_segments(
+                    "/skeleton",
+                    points=bone_points(joints[frame], paired=True),
+                    colors=np.tile(BONE_COLOR, (len(BONES), 2, 1)),
+                    line_width=0.01,
+                )
+                paired_segments = True
+                return handle
+            except ValueError:
+                paired_segments = False
+        n = 2 * len(BONES)
+        if paired_segments:
+            colors = np.tile(BONE_COLOR, (len(BONES), 2, 1))
+        else:
+            colors = np.tile(BONE_COLOR, (n, 1))
+        return server.scene.add_line_segments(
+            "/skeleton",
+            points=bone_points(joints[frame], paired=paired_segments),
+            colors=colors,
+            line_width=0.01,
+        )
+
+    def show(frame: int) -> None:
+        # Recreate the two handles each frame, exactly like the retargeter's
+        # debug visualization does; no version-sensitive property assignment.
+        for handle in handles:
+            handle.remove()
+        handles.clear()
+        handles.append(
+            server.scene.add_batched_meshes_simple(
+                "/joints",
+                vertices=sphere.vertices,
+                faces=sphere.faces,
+                batched_positions=joints[frame],
+                batched_wxyzs=np.tile(np.array([1, 0, 0, 0]), (joints[frame].shape[0], 1)),
+                batched_colors=JOINT_COLOR,
+                opacity=1.0,
+            )
+        )
+        handles.append(add_skeleton(frame))
+
+    playing = [True]
 
     @slider.on_update
-    def _(_: object = slider) -> None:
-        f = int(slider.value)
-        pts.points = joints[f]
-        lines.segments = np.array([[joints[f, p], joints[f, c]] for p, c in BONES])
+    def _on_slider(_: object = slider) -> None:
+        show(int(slider.value))
 
-    @gui.children[-1].on_click
-    def _toggle(_: object = gui.children[-1]) -> None:
-        nonlocal playing
-        playing = not playing
+    @pause_btn.on_click
+    def _on_pause(_: object = pause_btn) -> None:
+        playing[0] = not playing[0]
 
+    show(0)
     while True:
-        if playing and prev_playing and speed.value > 0:
+        if playing[0] and float(speed.value) > 0:
             nxt = (int(slider.value) + 1) % T
             slider.value = nxt
-            pts.points = joints[nxt]
-            lines.segments = np.array([[joints[nxt, p], joints[nxt, c]] for p, c in BONES])
+            show(nxt)
             time.sleep(1.0 / (30.0 * float(speed.value)))
         else:
             time.sleep(0.05)
-        prev_playing = playing
 
 
 if __name__ == "__main__":
