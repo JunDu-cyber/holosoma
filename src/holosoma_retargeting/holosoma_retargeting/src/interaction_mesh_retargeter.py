@@ -208,6 +208,63 @@ class InteractionMeshRetargeter:
             self._foot_lock_windows[side] = tuple(normalized_windows)
             self._foot_lock_z_floors[side] = tuple(z_floors)
 
+    def auto_foot_lock_from_stance(
+        self,
+        foot_sticking_sequences: list[dict[str, bool]],
+        z_floor: float = 0.0,
+        min_frames: int = 3,
+    ) -> None:
+        """Populate foot-lock windows from the detected human stance sequence.
+
+        Every contiguous stance interval of at least ``min_frames`` frames
+        becomes a Z-pinning window for that side's sole/toe links, anchored at
+        ``z_floor``. This keeps the foot sole on the ground when the leg chain
+        cannot lower the ankle landmark to its mesh target (robots whose limb
+        proportions exceed the uniformly scaled human's), which otherwise shows
+        up as standing on tiptoe: the heel is unobserved by the objective, so
+        the rigid foot pitches plantar while chasing the toe target.
+
+        Args:
+            foot_sticking_sequences: Per-frame dicts with one left* and one
+                right* key (e.g. ``{"L_Toe": bool, "R_Toe": bool}``), as
+                produced by ``extract_foot_sticking_sequence_velocity``.
+            z_floor: World z the sole/toe links are pinned to during stance.
+            min_frames: Minimum stance-interval length to become a window.
+        """
+        if not foot_sticking_sequences:
+            return
+        left_key = next((k for k in foot_sticking_sequences[0] if k.lower().startswith("l")), None)
+        right_key = next((k for k in foot_sticking_sequences[0] if k.lower().startswith("r")), None)
+        if left_key is None or right_key is None:
+            raise ValueError("foot_sticking_sequences must include one left* and one right* key")
+
+        self.foot_lock = FootLockConfig(
+            enable=True,
+            windows=None,
+            z_floor=float(z_floor),
+            tolerance=self.foot_lock.tolerance,
+            soft=True,
+            soft_weight=self.foot_lock.soft_weight,
+        )
+        for side, key in (("left", left_key), ("right", right_key)):
+            flags = np.array([bool(seq[key]) for seq in foot_sticking_sequences], dtype=bool)
+            windows: list[tuple[int, int]] = []
+            z_floors: list[float] = []
+            i = 0
+            while i < len(flags):
+                if flags[i]:
+                    j = i
+                    while j < len(flags) and flags[j]:
+                        j += 1
+                    if j - i >= min_frames:
+                        windows.append((i, j - 1))
+                        z_floors.append(float(z_floor))
+                    i = j
+                else:
+                    i += 1
+            self._foot_lock_windows[side] = tuple(windows)
+            self._foot_lock_z_floors[side] = tuple(z_floors)
+
     def _init_self_collision(self, self_collision: SelfCollisionConfig | None) -> None:
         """Initialize self-collision configuration and precompute geom pairs."""
         sc = self_collision or SelfCollisionConfig()
@@ -653,6 +710,7 @@ class InteractionMeshRetargeter:
         # Foot constraints (sticking + foot lock window Z pinning)
         apply_foot_sticking = (self.q_a_init_idx < 12) and self.activate_foot_sticking
         apply_foot_lock = (self.q_a_init_idx < 12) and self.foot_lock.enable
+        foot_lock_residuals: list = []
         if apply_foot_sticking or apply_foot_lock:
             J_WF_dict, p_WF_dict, _ = self._calc_manipulator_jacobians(q, links=self.foot_links, obj_frame=False)
 
@@ -683,7 +741,11 @@ class InteractionMeshRetargeter:
                             Jxy @ dqa <= p_ub[:2],
                         ]
 
-            # Foot lock windows: pin Z to floor within configured frame ranges
+            # Foot lock windows: pin Z to floor within configured frame ranges.
+            # With foot_lock.soft, the pin is a strong residual (TERRA-style
+            # anchor term) instead of a hard constraint: a hard one-step pin
+            # conflicts with the trust region when the foot is currently far
+            # above the anchor and makes the QP infeasible.
             if apply_foot_lock:
                 for key, J_WF in J_WF_dict.items():
                     z_anchor = self._is_foot_locked_in_window(key, frame_idx)
@@ -692,10 +754,13 @@ class InteractionMeshRetargeter:
 
                     z_delta = z_anchor - p_WF_dict[key][2]
                     Jz = J_WF[2, self.q_a_indices]
-                    constraints += [
-                        Jz @ dqa >= z_delta - self.foot_lock.tolerance,
-                        Jz @ dqa <= z_delta + self.foot_lock.tolerance,
-                    ]
+                    if self.foot_lock.soft:
+                        foot_lock_residuals.append((Jz, z_delta))
+                    else:
+                        constraints += [
+                            Jz @ dqa >= z_delta - self.foot_lock.tolerance,
+                            Jz @ dqa <= z_delta + self.foot_lock.tolerance,
+                        ]
 
         # Non-penetration constraints
         Js, phis = self._update_jacobians_and_phis_from_q(q)
@@ -726,6 +791,10 @@ class InteractionMeshRetargeter:
 
         # Objective
         obj_terms = []
+
+        # Soft foot-lock anchor residuals collected above
+        for Jz, z_delta in foot_lock_residuals:
+            obj_terms.append(self.foot_lock.soft_weight * cp.sum_squares(Jz @ dqa - z_delta))
 
         obj_terms.append(cp.sum_squares(cp.multiply(sqrt_w3, lap_var - target_lap_vec)))
 

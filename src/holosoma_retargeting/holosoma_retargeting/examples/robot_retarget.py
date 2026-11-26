@@ -693,6 +693,21 @@ def main(cfg: RetargetingConfig) -> None:
     # Extract foot sticking sequences
     foot_sticking_sequences = extract_foot_sticking_sequence_velocity(human_joints, retargeter.demo_joints, toe_names)
 
+    # Auto foot lock: pin the sole/toe links' Z to the floor during every
+    # detected human stance interval (see auto_foot_lock_from_stance).
+    if cfg.retargeter.foot_lock.auto_from_stance:
+        retargeter.auto_foot_lock_from_stance(
+            foot_sticking_sequences,
+            z_floor=0.0,
+            min_frames=cfg.retargeter.foot_lock.auto_min_frames,
+        )
+        n_left = sum(e - s + 1 for s, e in retargeter._foot_lock_windows["left"])
+        n_right = sum(e - s + 1 for s, e in retargeter._foot_lock_windows["right"])
+        logger.info(
+            "Auto foot lock: L sole/toe Z pinned for %d/%d frames, R for %d/%d",
+            n_left, len(foot_sticking_sequences), n_right, len(foot_sticking_sequences),
+        )
+
     # Task-specific foot sticking adjustments
     if task_type == "object_interaction":
         # Disable initial sticking

@@ -24,6 +24,33 @@ class FootLockConfig:
     tolerance: float = 5e-3
     """Tolerance for Z floor pinning constraints."""
 
+    auto_from_stance: bool = False
+    """Auto-populate the lock windows from the detected human stance sequence.
+
+    Equivalent to calling ``retargeter.auto_foot_lock_from_stance`` with the
+    ``foot_sticking_sequences`` computed for the motion: every stance interval
+    becomes a Z-pinning window for that side's sole/toe links. This keeps the
+    foot sole on the ground when the leg chain cannot lower the ankle landmark
+    to its target (robots whose limb proportions exceed the uniformly scaled
+    human's), which otherwise manifests as standing on tiptoe with the heel
+    unobserved by the objective.
+    """
+
+    auto_min_frames: int = 3
+    """Minimum stance-interval length (frames) for an auto foot-lock window."""
+
+    soft: bool = False
+    """Apply the Z pin as a strong residual instead of a hard constraint.
+
+    A hard one-step pin conflicts with the trust region when the foot is
+    currently far above the anchor and makes the QP infeasible; the soft
+    anchor pulls the foot down over successive SQP iterations (this is how
+    TERRA's calcaneus anchor residual works). auto_from_stance enables this.
+    """
+
+    soft_weight: float = 2000.0
+    """Weight of each soft foot-lock anchor residual."""
+
 
 @dataclass(frozen=True)
 class SelfCollisionConfig:
