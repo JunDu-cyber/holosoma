@@ -276,13 +276,16 @@ def load_motion_data(
         object_poses = np.tile(np.array([[1, 0, 0, 0, 0, 0, 0]]), (num_frames, 1))
         default_human_height = motion_data_config.default_human_height or 1.78
         smpl_scale = constants.ROBOT_HEIGHT / default_human_height
-        # A terrain.json task defines its OWN world scale: the scene (terrain
-        # AND this human reference) scales together by scene_scale, so the
-        # reference is always geometrically consistent with the collision
-        # geometry. scene_scale = 1.0 (build_climbing_assets default) keeps
-        # everything at real dimensions - a 1.22 m robot climbing a real
-        # 0.17 m-rise staircase, tracking a real 1.75 m human. Legacy files
-        # without the field keep the old robot-shrunk convention.
+        # smpl_scale stays ROBOT_HEIGHT/human_height: the human reference is
+        # ALWAYS scaled to robot size. scene_scale (how the terrain enters the
+        # robot world) is applied in setup_object_data, where the SOURCE mesh
+        # terrain points follow smpl_scale (consistent with the scaled human)
+        # and the TARGET mesh points + collision geometry follow scene_scale.
+        # The Laplacian is translation-invariant, so solving against the
+        # real-sized target terrain anchors the robot-scale motion onto the
+        # real treads (R ~ smpl_scale*H + (1-smpl_scale)*T_local). scene_scale
+        # is read here for the info line only. Legacy files without the field
+        # keep the old robot-shrunk convention in setup_object_data.
         terrain_json = task_dir / "terrain.json"
         if terrain_json.exists():
             import json as _json
@@ -291,11 +294,10 @@ def load_motion_data(
                 scene_scale = float(_json.load(f).get("scene_scale", smpl_scale))
             if scene_scale != smpl_scale:
                 print(
-                    f"terrain.json scene_scale={scene_scale:.4f} overrides the "
-                    f"human scale (robot_height/human_height={smpl_scale:.4f}); "
-                    "scene and reference scale together"
+                    f"terrain.json scene_scale={scene_scale:.4f} (human reference "
+                    f"scale stays robot_height/human_height={smpl_scale:.4f}); "
+                    "terrain enters the robot world at scene_scale"
                 )
-            smpl_scale = scene_scale
         # Climbing loads raw y-up sources for lafan (mirrors load_motion_data's
         # robot_only branch); mocap npy files are already z-up.
         if data_format == "lafan":
@@ -397,15 +399,22 @@ def setup_object_data(
                 ground_range=task_config.climbing_ground_range,
                 ground_size=task_config.climbing_ground_size,
             )
-            # The interaction mesh pairs these points with the SCALED human
-            # joints; they must carry the same scene_scale the collision
-            # geometry uses (see create_scaled_* below) or the robot tracks a
-            # world that does not match what it collides with.
-            object_local_pts_demo_original = pts * scene_scale
+            # Two meshes, two scales. The SOURCE mesh (whose Laplacian is the
+            # tracking target) pairs these points with the smpl_scale-scaled
+            # human joints, so they carry smpl_scale too - a geometrically
+            # consistent, robot-sized reference world. The TARGET mesh points
+            # and the collision geometry (create_scaled_* below) carry
+            # scene_scale - the world the robot actually moves in. The
+            # Laplacian is translation-invariant, so matching the source
+            # Laplacian against the real-sized target terrain anchors the
+            # robot-scale motion onto the real treads
+            # (R ~ smpl_scale*H + (1-smpl_scale)*T_local).
+            object_local_pts_demo_original = pts * smpl_scale
+            object_local_pts_world = pts * scene_scale
             print(
                 f"terrain.json: {len(spec.boxes)} boxes, "
                 f"{len(object_local_pts_demo_original)} surface points (TERRA recipe), "
-                f"scene_scale={scene_scale:.4f}"
+                f"scene_scale={scene_scale:.4f}, smpl_scale={smpl_scale:.4f}"
             )
 
             # Stash for the auto-foot-lock wiring in main(): with a terrain
@@ -425,6 +434,10 @@ def setup_object_data(
                 ),
                 sample_count=100,
             )
+            # No terrain.json: scene_scale fell back to smpl_scale above, so
+            # the world-scale points are the smpl-scaled points themselves
+            # (the pre-scene_scale convention).
+            object_local_pts_world = object_local_pts_demo_original
 
         if augmentation:
             ground_pts = create_ground_points(
@@ -432,11 +445,11 @@ def setup_object_data(
             )
             object_local_pts_demo = np.concatenate([object_local_pts_demo_original, ground_pts], axis=0)
             object_scale = object_scale_augmented
-            object_local_pts = object_scale * object_local_pts_demo
+            object_local_pts = object_scale * np.concatenate([object_local_pts_world, ground_pts], axis=0)
         else:
             object_scale = object_scale_normal
             object_local_pts_demo = object_local_pts_demo_original
-            object_local_pts = object_scale * object_local_pts_demo
+            object_local_pts = object_scale * object_local_pts_world
 
         # Create scaled URDF and XML files. scene_scale (not smpl_scale): with
         # a terrain.json the collision geometry must sit exactly where the
