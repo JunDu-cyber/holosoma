@@ -7,11 +7,18 @@ task expects, mirroring the demo_data/climb/<seq> layout:
     <task>_joint_positions.npy   raw motion (copied; the loader globs *.npy)
     multi_boxes.obj              merged terrain mesh, human scale
     box_models/boxN.obj          per-box meshes (vertices in world coords)
-    box_assets.xml               MuJoCo mesh assets, scale="1 1 1"
+    box_assets.xml               MuJoCo mesh assets, scaled to the robot
     box_body.xml                 static box bodies (contype/conaffinity 1)
-    multi_boxes.urdf             viser playback URDF
+    multi_boxes.urdf             viser playback URDF (same robot scale)
     terrain.json                 TerrainSpec + fit report sidecar
     n2_18dof_w_multi_boxes.xml   robot scene XML (+ ground + box includes)
+
+The scene follows the upstream demo convention (demo_data/climb/
+mocap_climb_seq_*, G1 = 0.7416): every terrain mesh is scaled by
+robot_height / 1.78 so the collision geometry lives in the same
+robot-scale world as the retarget targets (human joints and interaction
+mesh points are multiplied by the same smpl_scale at retarget time).
+terrain.json keeps the human-scale reconstruction as ground truth.
 
 The emitted scene references box_assets.xml/box_body.xml via <include>, so
 the repo's augmentation machinery (create_scaled_multi_boxes_xml, which
@@ -46,7 +53,8 @@ _PKG_PARENT = Path(__file__).resolve().parents[2]
 if str(_PKG_PARENT) not in sys.path:
     sys.path.insert(0, str(_PKG_PARENT))
 
-from holosoma_retargeting.config_types.data_type import DEMO_JOINTS_REGISTRY
+from holosoma_retargeting.config_types.data_type import DATA_FORMAT_CONSTANTS, DEMO_JOINTS_REGISTRY
+from holosoma_retargeting.config_types.robot import _ROBOT_DEFAULTS  # noqa: PLC2701 - single source of robot heights
 from holosoma_retargeting.src.terrain_reconstruction import BoxSpec, TerrainSpec, reconstruct_terrain
 
 
@@ -109,6 +117,14 @@ def main() -> int:
     if raw.shape[1] != len(demo):
         raise SystemExit(f"{fmt} expects {len(demo)} joints, npy has {raw.shape[1]}")
 
+    # Scene meshes are scaled into the robot world, mirroring the upstream
+    # demo convention (G1 seq_1 uses 0.7416 = 1.32/1.78) and matching the
+    # smpl_scale the climbing loader applies to human joints and mesh points.
+    human_height = DATA_FORMAT_CONSTANTS.get(fmt, {}).get("default_human_height") or 1.78
+    scene_scale = _ROBOT_DEFAULTS[args.robot]["robot_height"] / human_height
+    scale_str = f"{scene_scale} {scene_scale} {scene_scale}"
+    print(f"scene mesh scale: {scene_scale:.6f} ({args.robot} height / {human_height} human)")
+
     joints = raw[::downsample].astype(float)
     if fmt == "lafan":
         joints = _y_up_to_z_up(joints)
@@ -163,7 +179,7 @@ def main() -> int:
         '<?xml version="1.0"?>\n'
         f'<robot name="multi_boxes">\n'
         f'  <link name="multi_boxes_link">\n'
-        f'    <visual><geometry><mesh filename="./multi_boxes.obj" scale="1 1 1"/></geometry></visual>\n'
+        f'    <visual><geometry><mesh filename="./multi_boxes.obj" scale="{scale_str}"/></geometry></visual>\n'
         f'  </link>\n'
         f"</robot>\n"
     )
@@ -203,7 +219,7 @@ def main() -> int:
     box_file = lambda i: os.path.relpath(task_dir / "box_models" / f"box{i}.obj", robot_meshes)  # noqa: E731
     asset_lines = ["<mujocoinclude>"]
     for i in range(1, len(spec.boxes) + 1):
-        asset_lines.append(f'    <mesh name="box{i}" file="{box_file(i)}" scale="1 1 1"/>')
+        asset_lines.append(f'    <mesh name="box{i}" file="{box_file(i)}" scale="{scale_str}"/>')
     asset_lines += ["</mujocoinclude>"]
     (task_dir / "box_assets.xml").write_text("\n".join(asset_lines) + "\n")
 

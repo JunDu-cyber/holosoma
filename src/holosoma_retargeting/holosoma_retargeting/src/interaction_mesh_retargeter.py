@@ -260,6 +260,21 @@ class InteractionMeshRetargeter:
         for side, key in (("left", left_key), ("right", right_key)):
             flags = np.array([bool(seq[key]) for seq in foot_sticking_sequences], dtype=bool)
             z_series = foot_z_by_frame.get(key) if foot_z_by_frame is not None else None
+            if z_series is None and foot_z_by_frame:
+                # The caller may key the per-frame toe heights by the format's
+                # toe names ("LeftToeBase") while the sticking sequences use
+                # the generic "L_Toe"; bridge by side prefix. A silent None
+                # here would anchor every window at z_floor (0 on flat data,
+                # WRONG on terrain - feet glued to the floor).
+                z_series = next(
+                    (v for k, v in foot_z_by_frame.items() if k.lower().startswith(key[0].lower())),
+                    None,
+                )
+                if z_series is None:
+                    raise ValueError(
+                        f"foot_z_by_frame keys {list(foot_z_by_frame)} do not match "
+                        f"the sticking-sequence key '{key}' by side prefix"
+                    )
             windows: list[tuple[int, int]] = []
             z_floors: list[float] = []
             i = 0
