@@ -19,8 +19,10 @@ terrain mesh carries a ``scale`` attribute so the collision geometry can
 live in any world, and ``terrain.json`` records which one (``scene_scale``).
 Default 1.0 - the terrain keeps its real dimensions; ``--scene_scale robot``
 reproduces the upstream value (terrain shrunk to robot size). The
-retargeter reads ``scene_scale`` and applies it consistently to the
-interaction-mesh points, the collision geometry and the foot-lock anchors.
+retargeter applies ``scene_scale`` to the collision geometry, the foot-lock
+anchors and the direct placement anchors (torso + toes): the interaction
+mesh tracks only the robot-scale human SHAPE, and the anchors place it on
+the terrain - translated, not scaled (root-relative retargeting).
 
 The emitted scene references box_assets.xml/box_body.xml via <include>, so
 the repo's augmentation machinery (create_scaled_multi_boxes_xml, which

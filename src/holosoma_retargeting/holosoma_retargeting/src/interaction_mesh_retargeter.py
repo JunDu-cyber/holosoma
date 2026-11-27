@@ -472,6 +472,8 @@ class InteractionMeshRetargeter:
         q_nominal_list=None,
         original=True,
         dest_res_path=None,
+        body_anchor_targets=None,
+        body_anchor_weight=100.0,
     ):
         """
         The main function to retarget an entire motion sequence frame by frame.
@@ -487,11 +489,24 @@ class InteractionMeshRetargeter:
             foot_sticking_sequences (list): List of foot sticking sequences for each frame.
             q_a_init (np.ndarray, optional): Initial robot configuration.
             q_a_nominal (np.ndarray, optional): Nominal robot configuration.
+            body_anchor_targets (dict[str, np.ndarray] | None, optional): Direct
+                position anchors that place the robot-scale SHAPE in the world.
+                Maps robot LINK names to (num_frames, 3) world-frame target
+                positions; each frame adds a soft residual
+                weight * ||J dqa + p - target||^2 for that link (root-relative
+                retargeting: the interaction mesh keeps the shape, these anchors
+                set the placement - typically the torso link and both toe links).
+            body_anchor_weight (float): Soft residual weight per anchored link.
 
         Returns:
             tuple: (retargeted_motions, obj_pts_demo_list, obj_pts_list, tetrahedra)
         """
         num_frames = human_joint_motions.shape[0]
+        if body_anchor_targets:
+            for link, tgt in body_anchor_targets.items():
+                assert len(tgt) == num_frames, (
+                    f"body_anchor_targets['{link}'] length {len(tgt)} != num_frames {num_frames}"
+                )
         if isinstance(object_points_local_demo, list):
             assert len(object_points_local_demo) == num_frames, (
                 f"object_points_local_demo length {len(object_points_local_demo)} != num_frames {num_frames}"
@@ -572,6 +587,14 @@ class InteractionMeshRetargeter:
                 else:
                     w_nominal_tracking = self.w_nominal_tracking_init * np.exp(-i / self.nominal_tracking_tau)
 
+                # Direct placement anchors (root-relative retargeting): the
+                # interaction mesh preserves the robot-scale SHAPE, these soft
+                # position residuals place it in the world (torso + feet).
+                anchor_i = (
+                    {link: tgt[i] for link, tgt in body_anchor_targets.items()}
+                    if body_anchor_targets
+                    else None
+                )
                 q, cost = self.iterate(
                     q_locked=q_locked_list[i],
                     q_n=q,
@@ -585,6 +608,8 @@ class InteractionMeshRetargeter:
                     init_t=i == 0,
                     n_iter=50 if i == 0 else 10,
                     frame_idx=i,
+                    body_anchor_targets_i=anchor_i,
+                    body_anchor_weight=body_anchor_weight,
                 )
                 if self.debug:
                     robot_link_positions = self._get_robot_link_positions(
@@ -676,6 +701,8 @@ class InteractionMeshRetargeter:
         verbose=False,
         init_t=False,
         frame_idx: int = 0,
+        body_anchor_targets_i: dict[str, np.ndarray] | None = None,
+        body_anchor_weight: float = 100.0,
     ):
         """The main function to solve a single iteration of the DiffIK problem.
         Args:
@@ -689,6 +716,9 @@ class InteractionMeshRetargeter:
             obj_original: the original object pose (used for contact matching).
             init_t: the current time step is the first time step.
             frame_idx: frame index used by explicit foot lock window constraints.
+            body_anchor_targets_i: per-frame direct position anchors,
+                {robot link name: (3,) world target}; soft residuals.
+            body_anchor_weight: soft residual weight per anchored link.
         """
         assert len(q_a_n_last) == self.nq_a
 
@@ -830,6 +860,19 @@ class InteractionMeshRetargeter:
         # Soft foot-lock anchor residuals collected above
         for Jz, z_delta in foot_lock_residuals:
             obj_terms.append(self.foot_lock.soft_weight * cp.sum_squares(Jz @ dqa - z_delta))
+
+        # Direct placement anchors (root-relative retargeting): soft full-xyz
+        # position residuals on selected links. The interaction mesh keeps the
+        # robot-scale SHAPE (relative positions), these place it in the world
+        # (torso link + toe links) - scale-free placement, no Delaunay-neighbor
+        # terrain blending to pull the upper body around.
+        if body_anchor_targets_i:
+            J_A_dict, p_A_dict, _ = self._calc_manipulator_jacobians(
+                q, links={link: link for link in body_anchor_targets_i}, obj_frame=False
+            )
+            for link, target in body_anchor_targets_i.items():
+                delta = target - p_A_dict[link]
+                obj_terms.append(body_anchor_weight * cp.sum_squares(J_A_dict[link] @ dqa - delta))
 
         obj_terms.append(cp.sum_squares(cp.multiply(sqrt_w3, lap_var - target_lap_vec)))
 
@@ -998,6 +1041,8 @@ class InteractionMeshRetargeter:
         init_t: bool = False,
         n_iter: int = 10,
         frame_idx: int = 0,
+        body_anchor_targets_i: dict[str, np.ndarray] | None = None,
+        body_anchor_weight: float = 100.0,
     ):
         """Iterate the solver for multiple iterations."""
         last_cost = np.inf
@@ -1015,6 +1060,8 @@ class InteractionMeshRetargeter:
                 w_nominal_tracking=w_nominal_tracking,
                 init_t=init_t,
                 frame_idx=frame_idx,
+                body_anchor_targets_i=body_anchor_targets_i,
+                body_anchor_weight=body_anchor_weight,
             )
             if np.isclose(cost, last_cost):
                 break

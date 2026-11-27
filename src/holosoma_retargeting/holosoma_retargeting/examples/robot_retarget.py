@@ -393,27 +393,19 @@ def setup_object_data(
                 # baked smpl-scale geometry, so fall back to it there.
                 scene_scale = float(payload.get("scene_scale", smpl_scale))
             walkable = spec.walkable
-            mesh_spacing = 0.20
-            pts = walkable.surface_points(
-                spacing=mesh_spacing,
-                ground_range=task_config.climbing_ground_range,
-                ground_size=task_config.climbing_ground_size,
-            )
-            # Two meshes, two scales. The SOURCE mesh (whose Laplacian is the
-            # tracking target) pairs these points with the smpl_scale-scaled
-            # human joints, so they carry smpl_scale too - a geometrically
-            # consistent, robot-sized reference world. The TARGET mesh points
-            # and the collision geometry (create_scaled_* below) carry
-            # scene_scale - the world the robot actually moves in. The
-            # Laplacian is translation-invariant, so matching the source
-            # Laplacian against the real-sized target terrain anchors the
-            # robot-scale motion onto the real treads
-            # (R ~ smpl_scale*H + (1-smpl_scale)*T_local).
-            object_local_pts_demo_original = pts * smpl_scale
-            object_local_pts_world = pts * scene_scale
+            # Root-relative retargeting: the interaction mesh now carries ONLY
+            # the smpl_scale-scaled human shape (relative positions, reachable
+            # by the robot). Terrain points leave the mesh - with them came the
+            # Delaunay-neighbor blending that anchored the upper body to
+            # whatever surface points happened to be behind/below it (the
+            # "trunk pulled backward" artifact). World placement is handled by
+            # explicit position anchors (compute_body_anchor_targets) whose
+            # targets are translated, not scaled, to the real terrain.
+            object_local_pts_demo_original = np.zeros((0, 3))
+            object_local_pts_world = np.zeros((0, 3))
             print(
                 f"terrain.json: {len(spec.boxes)} boxes, "
-                f"{len(object_local_pts_demo_original)} surface points (TERRA recipe), "
+                f"interaction mesh = human shape only (terrain via placement anchors), "
                 f"scene_scale={scene_scale:.4f}, smpl_scale={smpl_scale:.4f}"
             )
 
@@ -464,6 +456,57 @@ def setup_object_data(
         return object_local_pts, object_local_pts_demo, object_urdf_file
 
     raise ValueError(f"Unknown task type: {task_type}")
+
+
+def compute_body_anchor_targets(
+    constants: SimpleNamespace,
+    retargeter: InteractionMeshRetargeter,
+    human_joints: np.ndarray,
+    toe_names: list[str],
+    smpl_scale: float,
+    scene_scale: float,
+) -> dict[str, np.ndarray]:
+    """Direct placement anchors for root-relative retargeting.
+
+    The interaction mesh now carries only the robot-scale SHAPE (relative
+    joint positions at smpl_scale). These anchors place that shape in the
+    world: the target is TRANSLATED, not scaled, onto the real terrain:
+
+        target = smpl_scale*H + (1-smpl_scale) * [H_xy, height_at(H_xy)]
+
+    i.e. the joint's raw xy trajectory with a z of "robot-scale body height
+    above the real tread under it". From the preprocessed joints (z-shifted,
+    scaled by smpl_scale) and the spec coordinates (robot world = spec x
+    scene_scale):
+
+        xy_target = H_xy / smpl_scale * scene_scale
+        z_target  = H_z + (1 - smpl_scale) * height_at(xy) * scene_scale
+
+    Anchored links: the torso (Spine1) and both toes, whenever the format's
+    JOINTS_MAPPING provides them. Returns {robot link name: (T, 3) targets};
+    empty when the task has no terrain.json (legacy tasks keep the old
+    terrain-in-mesh behavior).
+    """
+    walkable = getattr(constants, "TERRAIN_WALKABLE", None)
+    if walkable is None:
+        return {}
+    anchors: dict[str, np.ndarray] = {}
+    for name in ("Spine1", *toe_names):
+        if name not in constants.JOINTS_MAPPING:
+            continue
+        idx = retargeter.demo_joints.index(name)
+        xy_spec = human_joints[:, idx, :2] / smpl_scale
+        h = walkable.height_at(xy_spec[:, 0], xy_spec[:, 1]) * scene_scale
+        target = np.stack(
+            [
+                xy_spec[:, 0] * scene_scale,
+                xy_spec[:, 1] * scene_scale,
+                human_joints[:, idx, 2] + (1.0 - smpl_scale) * h,
+            ],
+            axis=1,
+        )
+        anchors[constants.JOINTS_MAPPING[name]] = target
+    return anchors
 
 
 def _compute_q_init_base(
@@ -830,6 +873,17 @@ def main(cfg: RetargetingConfig) -> None:
         foot_sticking_sequences[0][toe_names[0]] = False
         foot_sticking_sequences[0][toe_names[1]] = False
 
+    # Direct placement anchors (root-relative retargeting): with a terrain.json
+    # the interaction mesh carries only the robot-scale human shape; these
+    # anchors (torso + toes, translated onto the real terrain) place it in the
+    # world. Legacy tasks without terrain.json keep the terrain-in-mesh path.
+    body_anchor_targets: dict[str, np.ndarray] = {}
+    if task_type == "climbing" and getattr(constants, "TERRAIN_WALKABLE", None) is not None:
+        body_anchor_targets = compute_body_anchor_targets(
+            constants, retargeter, human_joints, toe_names, smpl_scale, constants.TERRAIN_SCENE_SCALE
+        )
+        logger.info("Body placement anchors: %s", ", ".join(body_anchor_targets))
+
     # Determine output path
     dest_res_path = determine_output_path(task_type, save_dir, task_name, cfg.augmentation)
 
@@ -846,6 +900,7 @@ def main(cfg: RetargetingConfig) -> None:
         q_nominal_list=q_nominal,
         original=not cfg.augmentation,
         dest_res_path=dest_res_path,
+        body_anchor_targets=body_anchor_targets or None,
     )
     logger.info("Retargeting complete. Results saved to: %s", dest_res_path)
 

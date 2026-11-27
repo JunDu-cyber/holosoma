@@ -31,6 +31,7 @@ from holosoma_retargeting.config_types.robot import RobotConfig  # noqa: E402
 from holosoma_retargeting.examples.robot_retarget import (  # type: ignore[import-not-found]  # noqa: E402
     DEFAULT_DATA_FORMATS,
     build_retargeter_kwargs_from_config,
+    compute_body_anchor_targets,
     create_task_constants,
     initialize_robot_pose,
     load_motion_data,
@@ -286,6 +287,16 @@ def process_single_task(args):
         if Path.exists(Path(file_name)):
             continue
 
+        # Direct placement anchors (root-relative retargeting), same as
+        # robot_retarget.main(): with a terrain.json the interaction mesh
+        # carries only the robot-scale human shape; these anchors place it on
+        # the real terrain.
+        body_anchor_targets: dict[str, np.ndarray] = {}
+        if task_type == "climbing" and getattr(constants, "TERRAIN_WALKABLE", None) is not None:
+            body_anchor_targets = compute_body_anchor_targets(
+                constants, retargeter, human_joints, toe_names, smpl_scale, constants.TERRAIN_SCENE_SCALE
+            )
+
         # Retarget motion
         retargeted_motions, _, _, _ = retargeter.retarget_motion(
             human_joint_motions=human_joints,
@@ -298,6 +309,7 @@ def process_single_task(args):
             q_nominal_list=q_nominal,
             original=(k == 0),
             dest_res_path=file_name,
+            body_anchor_targets=body_anchor_targets or None,
         )
 
 
