@@ -722,9 +722,15 @@ def transform_y_up_to_z_up(points):
     """
     Transform points from y-up to z-up coordinate system.
 
+    This is a PROPER ROTATION (+90 deg about x, determinant +1), not a mirror:
+    an axis swap (y<->z) has determinant -1 and flips the motion's handedness,
+    turning a right-handed walker into a mirror image - which reads as a
+    person walking BACKWARD. Robots tracking the mirrored reference climb
+    stairs facing away from their travel direction.
+
     Transformation:
     - Y-axis (up) becomes Z-axis (up)
-    - Z-axis (forward) becomes Y-axis (forward)
+    - Z-axis (forward) becomes NEGATED Y-axis
     - X-axis (right) stays X-axis (right)
 
     Args:
@@ -734,8 +740,8 @@ def transform_y_up_to_z_up(points):
         np.ndarray: Transformed points with shape (..., 3) where last dimension is [x, y, z]
     """
     # Create transformation matrix
-    # [x, y, z] -> [x, z, y]
-    transform_matrix = np.array([[1, 0, 0], [0, 0, 1], [0, 1, 0]])
+    # [x, y, z] -> [x, -z, y]
+    transform_matrix = np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]])
 
     # Apply transformation
     if points.ndim == 1:

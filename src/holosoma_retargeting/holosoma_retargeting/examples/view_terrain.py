@@ -55,13 +55,16 @@ JOINT_COLOR = (51, 102, 255)
 
 
 def y_up_to_z_up(joints: np.ndarray) -> np.ndarray:
-    """Same axis swap the climbing loader applies to lafan sources.
+    """Same transform the climbing loader applies to lafan sources.
 
-    Mirrors ``transform_y_up_to_z_up`` in src/utils.py exactly: y (up)
-    becomes z (up), z (forward) becomes y, x stays - a plain swap, no flip.
+    Matches ``transform_y_up_to_z_up`` in src/utils.py exactly: a proper
+    rotation (+90 deg about x, det +1) - y (up) becomes z (up), z (forward)
+    becomes -y, x stays. Not a mirror: an axis swap would flip the motion's
+    handedness and the human would read as walking backward.
     """
     out = joints.copy()
-    out[..., [1, 2]] = joints[..., [2, 1]]
+    out[..., 1] = -joints[..., 2]
+    out[..., 2] = joints[..., 1]
     return out
 
 

@@ -59,9 +59,9 @@ from holosoma_retargeting.src.terrain_reconstruction import BoxSpec, TerrainSpec
 
 
 def _y_up_to_z_up(points: np.ndarray) -> np.ndarray:
-    """Mirror of utils.transform_y_up_to_z_up (x stays, y->z, z->y)."""
+    """Proper rotation, matches utils.transform_y_up_to_z_up (x stays, z->-y, y->z)."""
     out = points.copy()
-    out[..., 1] = points[..., 2]
+    out[..., 1] = -points[..., 2]
     out[..., 2] = points[..., 1]
     return out
 

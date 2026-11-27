@@ -4,7 +4,7 @@
       {
         "pos": [
           0.5896477385510772,
-          0.011010494057020143,
+          -0.011010494057020143,
           0.08499999999999994
         ],
         "size": [
@@ -12,14 +12,14 @@
           0.5,
           0.08499999999999994
         ],
-        "yaw": -0.03518824193981942,
+        "yaw": 0.03518824193981942,
         "pitch": 0.0,
         "name": "terrain_box_0"
       },
       {
         "pos": [
           1.0797802105062255,
-          -0.00624352791777269,
+          0.00624352791777269,
           0.16999999999999998
         ],
         "size": [
@@ -27,14 +27,14 @@
           0.5,
           0.16999999999999998
         ],
-        "yaw": -0.03518824193981942,
+        "yaw": 0.03518824193981942,
         "pitch": 0.0,
         "name": "terrain_box_1"
       },
       {
         "pos": [
           1.3794089000866587,
-          -0.01679128855415073,
+          0.01679128855415073,
           0.255
         ],
         "size": [
@@ -42,14 +42,14 @@
           0.5,
           0.255
         ],
-        "yaw": -0.03518824193981942,
+        "yaw": 0.03518824193981942,
         "pitch": 0.0,
         "name": "terrain_box_2"
       },
       {
         "pos": [
           1.7772239119213584,
-          -0.03079547996941874,
+          0.03079547996941874,
           0.3400000000000001
         ],
         "size": [
@@ -57,7 +57,7 @@
           0.5,
           0.3400000000000001
         ],
-        "yaw": -0.03518824193981942,
+        "yaw": 0.03518824193981942,
         "pitch": 0.0,
         "name": "terrain_box_3"
       }
@@ -81,10 +81,10 @@
       "stance_timing_source": "kinematic",
       "seat_height_source": "fixed_pelvis_offset",
       "joint_surface_offsets_m": {
-        "R_Toe": 0.02,
+        "L_Toe": 0.02,
         "R_Ankle": 0.07,
         "L_Ankle": 0.07,
-        "L_Toe": 0.02
+        "R_Toe": 0.02
       },
       "model": "stair_flight",
       "n_seats": 0
@@ -114,10 +114,10 @@
     },
     "n_seats": 0,
     "joint_offsets": {
-      "R_Toe": 0.02,
+      "L_Toe": 0.02,
       "R_Ankle": 0.07,
       "L_Ankle": 0.07,
-      "L_Toe": 0.02
+      "R_Toe": 0.02
     },
     "pelvis_seat_offset": 0.16,
     "ground_level": {
@@ -160,10 +160,10 @@
     "ramp": {
       "model": "ramp",
       "n_events": 20,
-      "yaw": 0.01119122092199221,
+      "yaw": -0.01119122092199221,
       "origin_xy": [
         0.938,
-        -1.3877787807814458e-18
+        1.3877787807814458e-18
       ],
       "u0": -0.47904157386050206,
       "u1": 0.8009584261394991,
@@ -221,7 +221,7 @@
     },
     "stair_flight": {
       "model": "stair_flight",
-      "yaw": -0.03518824193981942,
+      "yaw": 0.03518824193981942,
       "heights": [
         -2.1034319994076653e-16,
         0.16999999999999987,
@@ -370,5 +370,5 @@
     "model": "stair_flight"
   },
   "provenance": "holosoma_retargeting.src.terrain_reconstruction (vendored TERRA @db9d0d6)",
-  "source_motion": "synthetic_lafan_stairs.npy"
+  "source_motion": "demo_data/climb_lafan/synthetic_stairs/synthetic_stairs_joint_positions.npy"
 }
