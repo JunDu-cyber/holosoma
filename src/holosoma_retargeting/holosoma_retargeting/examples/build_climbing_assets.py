@@ -110,6 +110,18 @@ def main() -> int:
     if task_dir.exists() and not args.overwrite:
         raise SystemExit(f"{task_dir} already exists (use --overwrite to re-emit)")
 
+    # Retarget-time artifacts (*_scaled_*.xml/urdf) are derived from the raw
+    # assets by create_scaled_multi_boxes_xml / create_new_scene_xml_file,
+    # which short-circuit when the output already exists. If a previous
+    # generation leaves them behind, the next retarget would silently keep
+    # solving against the OLD collision geometry. They must not outlive the
+    # raw assets they were derived from.
+    stale = sorted(task_dir.glob("*_scaled_*")) if task_dir.exists() else []
+    for p in stale:
+        p.unlink()
+    if stale:
+        print(f"removed {len(stale)} stale retarget-time artifact(s): {[p.name for p in stale]}")
+
     raw = np.load(args.motion_npy)
     if raw.ndim != 3 or raw.shape[2] != 3:
         raise SystemExit(f"motion npy must be (T, J, 3), got {raw.shape}")
