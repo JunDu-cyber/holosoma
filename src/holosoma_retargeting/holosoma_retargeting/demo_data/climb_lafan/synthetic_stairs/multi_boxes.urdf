@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <robot name="multi_boxes">
   <link name="multi_boxes_link">
-    <visual><geometry><mesh filename="./multi_boxes.obj" scale="0.6848314606741573 0.6848314606741573 0.6848314606741573"/></geometry></visual>
+    <visual><geometry><mesh filename="./multi_boxes.obj" scale="1.0 1.0 1.0"/></geometry></visual>
   </link>
 </robot>

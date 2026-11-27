@@ -81,15 +81,16 @@
       "stance_timing_source": "kinematic",
       "seat_height_source": "fixed_pelvis_offset",
       "joint_surface_offsets_m": {
-        "L_Toe": 0.02,
         "R_Ankle": 0.07,
         "L_Ankle": 0.07,
+        "L_Toe": 0.02,
         "R_Toe": 0.02
       },
       "model": "stair_flight",
       "n_seats": 0
     }
   },
+  "scene_scale": 1.0,
   "report": {
     "n_frames": 159,
     "n_stance_events": 20,
@@ -114,9 +115,9 @@
     },
     "n_seats": 0,
     "joint_offsets": {
-      "L_Toe": 0.02,
       "R_Ankle": 0.07,
       "L_Ankle": 0.07,
+      "L_Toe": 0.02,
       "R_Toe": 0.02
     },
     "pelvis_seat_offset": 0.16,

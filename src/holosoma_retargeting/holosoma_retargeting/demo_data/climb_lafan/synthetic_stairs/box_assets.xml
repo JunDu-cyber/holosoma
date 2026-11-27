@@ -1,6 +1,6 @@
 <mujocoinclude>
-    <mesh name="box1" file="../../../demo_data/climb_lafan/synthetic_stairs/box_models/box1.obj" scale="0.6848314606741573 0.6848314606741573 0.6848314606741573"/>
-    <mesh name="box2" file="../../../demo_data/climb_lafan/synthetic_stairs/box_models/box2.obj" scale="0.6848314606741573 0.6848314606741573 0.6848314606741573"/>
-    <mesh name="box3" file="../../../demo_data/climb_lafan/synthetic_stairs/box_models/box3.obj" scale="0.6848314606741573 0.6848314606741573 0.6848314606741573"/>
-    <mesh name="box4" file="../../../demo_data/climb_lafan/synthetic_stairs/box_models/box4.obj" scale="0.6848314606741573 0.6848314606741573 0.6848314606741573"/>
+    <mesh name="box1" file="../../../demo_data/climb_lafan/synthetic_stairs/box_models/box1.obj" scale="1.0 1.0 1.0"/>
+    <mesh name="box2" file="../../../demo_data/climb_lafan/synthetic_stairs/box_models/box2.obj" scale="1.0 1.0 1.0"/>
+    <mesh name="box3" file="../../../demo_data/climb_lafan/synthetic_stairs/box_models/box3.obj" scale="1.0 1.0 1.0"/>
+    <mesh name="box4" file="../../../demo_data/climb_lafan/synthetic_stairs/box_models/box4.obj" scale="1.0 1.0 1.0"/>
 </mujocoinclude>

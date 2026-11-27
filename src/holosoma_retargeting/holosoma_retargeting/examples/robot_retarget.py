@@ -276,6 +276,26 @@ def load_motion_data(
         object_poses = np.tile(np.array([[1, 0, 0, 0, 0, 0, 0]]), (num_frames, 1))
         default_human_height = motion_data_config.default_human_height or 1.78
         smpl_scale = constants.ROBOT_HEIGHT / default_human_height
+        # A terrain.json task defines its OWN world scale: the scene (terrain
+        # AND this human reference) scales together by scene_scale, so the
+        # reference is always geometrically consistent with the collision
+        # geometry. scene_scale = 1.0 (build_climbing_assets default) keeps
+        # everything at real dimensions - a 1.22 m robot climbing a real
+        # 0.17 m-rise staircase, tracking a real 1.75 m human. Legacy files
+        # without the field keep the old robot-shrunk convention.
+        terrain_json = task_dir / "terrain.json"
+        if terrain_json.exists():
+            import json as _json
+
+            with open(terrain_json) as f:
+                scene_scale = float(_json.load(f).get("scene_scale", smpl_scale))
+            if scene_scale != smpl_scale:
+                print(
+                    f"terrain.json scene_scale={scene_scale:.4f} overrides the "
+                    f"human scale (robot_height/human_height={smpl_scale:.4f}); "
+                    "scene and reference scale together"
+                )
+            smpl_scale = scene_scale
         # Climbing loads raw y-up sources for lafan (mirrors load_motion_data's
         # robot_only branch); mocap npy files are already z-up.
         if data_format == "lafan":
@@ -344,6 +364,10 @@ def setup_object_data(
         np.random.seed(0)
         print("object mesh file: ", constants.OBJECT_MESH_FILE)
 
+        # scene_scale: how the reconstructed terrain enters the robot world.
+        # Defaults to the older robot-shrunk convention; overridden to the
+        # terrain.json value (default 1.0 = real dimensions) when present.
+        scene_scale = smpl_scale
         terrain_json = object_dir / "terrain.json"
         if terrain_json.exists():
             # Terrain reconstructed by the vendored TERRA core (see
@@ -357,7 +381,15 @@ def setup_object_data(
             from holosoma_retargeting.src.terrain_reconstruction import TerrainSpec
 
             with open(terrain_json) as f:
-                spec = TerrainSpec.from_dict(_json.load(f)["terrain"])
+                payload = _json.load(f)
+                spec = TerrainSpec.from_dict(payload["terrain"])
+                # scene_scale: how the reconstructed terrain enters the robot
+                # world. Default 1.0 - the terrain keeps its REAL dimensions
+                # (a 0.17 m stair rise stays 0.17 m for a 1.22 m robot). The
+                # older convention multiplied by smpl_scale (terrain shrunk to
+                # robot size); files written before this field existed carry
+                # baked smpl-scale geometry, so fall back to it there.
+                scene_scale = float(payload.get("scene_scale", smpl_scale))
             walkable = spec.walkable
             mesh_spacing = 0.20
             pts = walkable.surface_points(
@@ -365,14 +397,23 @@ def setup_object_data(
                 ground_range=task_config.climbing_ground_range,
                 ground_size=task_config.climbing_ground_size,
             )
-            # Robot world: the interaction mesh pairs these points with the
-            # SCALED human joints (mirrors load_object_data's points_scaled),
-            # so they must carry smpl_scale like every other mesh vertex.
-            object_local_pts_demo_original = pts * smpl_scale
+            # The interaction mesh pairs these points with the SCALED human
+            # joints; they must carry the same scene_scale the collision
+            # geometry uses (see create_scaled_* below) or the robot tracks a
+            # world that does not match what it collides with.
+            object_local_pts_demo_original = pts * scene_scale
             print(
                 f"terrain.json: {len(spec.boxes)} boxes, "
-                f"{len(object_local_pts_demo_original)} surface points (TERRA recipe)"
+                f"{len(object_local_pts_demo_original)} surface points (TERRA recipe), "
+                f"scene_scale={scene_scale:.4f}"
             )
+
+            # Stash for the auto-foot-lock wiring in main(): with a terrain
+            # file the anchor z must be the terrain surface height under the
+            # planted foot (right for ANY scene_scale), not the mocap contact
+            # height (only right when scene_scale == smpl_scale).
+            constants.TERRAIN_WALKABLE = walkable
+            constants.TERRAIN_SCENE_SCALE = scene_scale
         else:
             object_local_pts, object_local_pts_demo_original = load_object_data(
                 constants.OBJECT_MESH_FILE,
@@ -397,8 +438,11 @@ def setup_object_data(
             object_local_pts_demo = object_local_pts_demo_original
             object_local_pts = object_scale * object_local_pts_demo
 
-        # Create scaled URDF and XML files
-        scale_factors = tuple(float(value) for value in (object_scale * smpl_scale))
+        # Create scaled URDF and XML files. scene_scale (not smpl_scale): with
+        # a terrain.json the collision geometry must sit exactly where the
+        # interaction-mesh points were placed - at scene_scale, which is 1.0
+        # (real dimensions) for freshly built tasks.
+        scale_factors = tuple(float(value) for value in (object_scale * scene_scale))
         object_urdf_file = create_scaled_multi_boxes_urdf(constants.OBJECT_URDF_FILE, scale_factors)
         object_asset_xml_path = create_scaled_multi_boxes_xml(str(box_asset_xml), scale_factors)
         new_scene_xml_path = create_new_scene_xml_file(str(scene_xml_file), scale_factors, object_asset_xml_path)
@@ -730,14 +774,30 @@ def main(cfg: RetargetingConfig) -> None:
     # Extract foot sticking sequences
     foot_sticking_sequences = extract_foot_sticking_sequence_velocity(human_joints, retargeter.demo_joints, toe_names)
 
-    # Auto foot lock: anchor the sole/toe links' Z at the observed human contact
-    # height during every detected stance interval (see auto_foot_lock_from_stance).
+    # Auto foot lock: anchor the sole/toe links' Z during every detected stance
+    # interval (see auto_foot_lock_from_stance). With a terrain.json the anchor
+    # is the terrain surface height under the planted foot - correct for ANY
+    # scene_scale - instead of the mocap contact height, which is only right
+    # when the terrain is scaled by smpl_scale.
     if cfg.retargeter.foot_lock.auto_from_stance:
         toe_idx = [retargeter.demo_joints.index(name) for name in toe_names]
-        foot_z = {
-            name: human_joints[:, idx, 2]
-            for name, idx in zip(toe_names, toe_idx)
-        }
+        walkable = getattr(constants, "TERRAIN_WALKABLE", None)
+        if walkable is not None:
+            scene_scale = constants.TERRAIN_SCENE_SCALE
+            foot_z = {}
+            for name, idx in zip(toe_names, toe_idx):
+                # preprocess scales ALL axes by smpl_scale (z is also shifted),
+                # so undo it on xy to query the spec, then bring the height
+                # back with scene_scale.
+                xs = human_joints[:, idx, 0] / smpl_scale
+                ys = human_joints[:, idx, 1] / smpl_scale
+                foot_z[name] = walkable.height_at(xs, ys) * scene_scale
+            logger.info("Auto foot lock: anchors from terrain surface heights (scene_scale=%.4f)", scene_scale)
+        else:
+            foot_z = {
+                name: human_joints[:, idx, 2]
+                for name, idx in zip(toe_names, toe_idx)
+            }
         retargeter.auto_foot_lock_from_stance(
             foot_sticking_sequences,
             z_floor=None,

@@ -79,7 +79,8 @@ def main() -> None:
     args = parser.parse_args()
 
     with open(args.task_dir / "terrain.json") as f:
-        spec = TerrainSpec.from_dict(json.load(f)["terrain"])
+        payload = json.load(f)
+        spec = TerrainSpec.from_dict(payload["terrain"])
 
     npy_files = sorted(args.task_dir.glob("*.npy"))
     joints = np.load(npy_files[0]) if npy_files else None
@@ -89,10 +90,12 @@ def main() -> None:
     if args.data_format == "lafan":
         joints = y_up_to_z_up(joints)
 
-    scale = args.robot_height / args.human_height
+    # The solve world: whatever scene_scale the retargeter will use, so this
+    # view is exactly what the solver sees. --human_scale forces 1:1 instead.
+    scale = float(payload.get("scene_scale", args.robot_height / args.human_height))
     if args.human_scale:
         scale = 1.0
-    world = "human (1:1)" if args.human_scale else f"robot (x{scale:.3f})"
+    world = "human (1:1)" if args.human_scale else f"solve world (x{scale:.3f})"
     print(f"{len(spec.boxes)} boxes, {0 if joints is None else len(joints)} frames, world: {world}")
 
     server = viser.ViserServer(port=args.port)

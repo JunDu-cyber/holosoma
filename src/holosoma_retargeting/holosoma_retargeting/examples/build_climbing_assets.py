@@ -14,11 +14,13 @@ task expects, mirroring the demo_data/climb/<seq> layout:
     n2_18dof_w_multi_boxes.xml   robot scene XML (+ ground + box includes)
 
 The scene follows the upstream demo convention (demo_data/climb/
-mocap_climb_seq_*, G1 = 0.7416): every terrain mesh is scaled by
-robot_height / 1.78 so the collision geometry lives in the same
-robot-scale world as the retarget targets (human joints and interaction
-mesh points are multiplied by the same smpl_scale at retarget time).
-terrain.json keeps the human-scale reconstruction as ground truth.
+mocap_climb_seq_*, G1 = 0.7416) in MECHANISM but not in value: every
+terrain mesh carries a ``scale`` attribute so the collision geometry can
+live in any world, and ``terrain.json`` records which one (``scene_scale``).
+Default 1.0 - the terrain keeps its real dimensions; ``--scene_scale robot``
+reproduces the upstream value (terrain shrunk to robot size). The
+retargeter reads ``scene_scale`` and applies it consistently to the
+interaction-mesh points, the collision geometry and the foot-lock anchors.
 
 The emitted scene references box_assets.xml/box_body.xml via <include>, so
 the repo's augmentation machinery (create_scaled_multi_boxes_xml, which
@@ -95,6 +97,11 @@ def main() -> int:
     parser.add_argument("--data_path", default="demo_data/climb_lafan", help="parent dir of the task directory")
     parser.add_argument("--data_format", default="lafan", choices=["lafan", "mocap"])
     parser.add_argument("--robot", default="n2", help="robot name (scene template <robot>_18dof.xml)")
+    parser.add_argument(
+        "--scene_scale",
+        default="1.0",
+        help="terrain scale in the robot world: '1.0' (default, real dimensions) or 'robot' (shrink with robot_height/1.78)",
+    )
     parser.add_argument("--fps", type=float, default=None, help="source fps (default 30 lafan / 120 mocap)")
     parser.add_argument("--stair_flight", default="auto", choices=["auto", "off"])
     parser.add_argument("--ramp", default="auto", choices=["auto", "off"])
@@ -129,13 +136,19 @@ def main() -> int:
     if raw.shape[1] != len(demo):
         raise SystemExit(f"{fmt} expects {len(demo)} joints, npy has {raw.shape[1]}")
 
-    # Scene meshes are scaled into the robot world, mirroring the upstream
-    # demo convention (G1 seq_1 uses 0.7416 = 1.32/1.78) and matching the
-    # smpl_scale the climbing loader applies to human joints and mesh points.
-    human_height = DATA_FORMAT_CONSTANTS.get(fmt, {}).get("default_human_height") or 1.78
-    scene_scale = _ROBOT_DEFAULTS[args.robot]["robot_height"] / human_height
+    # scene_scale: how the terrain enters the robot world. Default 1.0 - the
+    # terrain keeps its REAL dimensions (a 0.17 m stair rise stays 0.17 m for a
+    # 1.22 m robot; the reference human is still scaled to robot size by the
+    # retargeter, and the foot-lock anchors adapt via height_at). The older
+    # convention shrank the terrain with the human (robot_height/1.78); pass
+    # --scene_scale robot to reproduce it.
+    if args.scene_scale == "robot":
+        human_height = DATA_FORMAT_CONSTANTS.get(fmt, {}).get("default_human_height") or 1.78
+        scene_scale = _ROBOT_DEFAULTS[args.robot]["robot_height"] / human_height
+    else:
+        scene_scale = float(args.scene_scale)
     scale_str = f"{scene_scale} {scene_scale} {scene_scale}"
-    print(f"scene mesh scale: {scene_scale:.6f} ({args.robot} height / {human_height} human)")
+    print(f"scene mesh scale: {scene_scale:.6f} (terrain dimensions x scene_scale)")
 
     joints = raw[::downsample].astype(float)
     if fmt == "lafan":
@@ -202,6 +215,7 @@ def main() -> int:
         json.dump(
             {
                 "terrain": spec.to_dict(),
+                "scene_scale": scene_scale,
                 "report": {k: v for k, v in report.items() if k not in ("levels",)},
                 "provenance": "holosoma_retargeting.src.terrain_reconstruction (vendored TERRA @db9d0d6)",
                 "source_motion": str(args.motion_npy),
