@@ -834,11 +834,8 @@ def main(cfg: RetargetingConfig) -> None:
     # interval (see auto_foot_lock_from_stance). With a terrain.json the anchor
     # is the terrain surface height under the planted foot - correct for ANY
     # scene_scale - instead of the mocap contact height, which is only right
-    # when the terrain is scaled by smpl_scale. Skipped in TERRA stance mode,
-    # which pins the foot HORIZONTALLY at its touchdown anchor instead of
-    # pinning Z (TERRA-style, arXiv:2609.38653).
-    use_terra_stance = cfg.retargeter.terra_stance.enable and getattr(constants, "TERRAIN_WALKABLE", None) is not None
-    if cfg.retargeter.foot_lock.auto_from_stance and not use_terra_stance:
+    # when the terrain is scaled by smpl_scale.
+    if cfg.retargeter.foot_lock.auto_from_stance:
         toe_idx = [retargeter.demo_joints.index(name) for name in toe_names]
         walkable = getattr(constants, "TERRAIN_WALKABLE", None)
         if walkable is not None:
@@ -887,47 +884,6 @@ def main(cfg: RetargetingConfig) -> None:
         )
         logger.info("Body placement anchors: %s", ", ".join(body_anchor_targets))
 
-    # TERRA stance mode: touchdown horizontal anchors per foot link. Each
-    # stance interval of a side is anchored at the translated toe target's xy
-    # at the INTERVAL START (the touchdown position) - the anchor does not
-    # drift frame to frame (TERRA's a_i). Sole and toe links share the anchor
-    # (they are one rigid foot on N2).
-    stance_anchor_xy: dict[str, np.ndarray] = {}
-    if cfg.retargeter.terra_stance.enable:
-        if not body_anchor_targets:
-            logger.warning(
-                "terra_stance needs a terrain.json task (touchdown anchors derive "
-                "from the translated toe targets); falling back to sticking/foot-lock."
-            )
-        else:
-            for side_key, toe_key in (("L_Toe", toe_names[0]), ("R_Toe", toe_names[1])):
-                toe_link = constants.JOINTS_MAPPING.get(toe_key)
-                if toe_link is None:
-                    continue
-                target = body_anchor_targets[toe_link]
-                flags = np.array([bool(seq[side_key]) for seq in foot_sticking_sequences])
-                anchors = np.zeros((len(flags), 2))
-                i = 0
-                while i < len(flags):
-                    if flags[i]:
-                        j = i
-                        while j < len(flags) and flags[j]:
-                            j += 1
-                        anchors[i:j] = target[i, :2]  # touchdown = interval-start target xy
-                        i = j
-                    else:
-                        i += 1
-                side = "left" if toe_key.lower().startswith("l") else "right"
-                for link in constants.FOOT_STICKING_LINKS:
-                    if side in link:
-                        stance_anchor_xy[link] = anchors
-            logger.info(
-                "TERRA stance: touchdown xy anchors + anti-slide on %s "
-                "(anchor weight %.0f, antislide weight %.0f, no Z pin)",
-                ", ".join(stance_anchor_xy), cfg.retargeter.terra_stance.anchor_weight,
-                cfg.retargeter.terra_stance.antislide_weight,
-            )
-
     # Determine output path
     dest_res_path = determine_output_path(task_type, save_dir, task_name, cfg.augmentation)
 
@@ -945,10 +901,6 @@ def main(cfg: RetargetingConfig) -> None:
         original=not cfg.augmentation,
         dest_res_path=dest_res_path,
         body_anchor_targets=body_anchor_targets or None,
-        terra_stance=cfg.retargeter.terra_stance.enable and bool(stance_anchor_xy),
-        stance_anchor_xy=stance_anchor_xy or None,
-        terra_anchor_weight=cfg.retargeter.terra_stance.anchor_weight,
-        terra_antislide_weight=cfg.retargeter.terra_stance.antislide_weight,
     )
     logger.info("Retargeting complete. Results saved to: %s", dest_res_path)
 

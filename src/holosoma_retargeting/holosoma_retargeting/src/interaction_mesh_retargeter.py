@@ -474,10 +474,6 @@ class InteractionMeshRetargeter:
         dest_res_path=None,
         body_anchor_targets=None,
         body_anchor_weight=100.0,
-        terra_stance=False,
-        stance_anchor_xy=None,
-        terra_anchor_weight=500.0,
-        terra_antislide_weight=500.0,
     ):
         """
         The main function to retarget an entire motion sequence frame by frame.
@@ -501,14 +497,6 @@ class InteractionMeshRetargeter:
                 retargeting: the interaction mesh keeps the shape, these anchors
                 set the placement - typically the torso link and both toe links).
             body_anchor_weight (float): Soft residual weight per anchored link.
-            terra_stance (bool): Use TERRA-style stance contact (arXiv:2609.38653)
-                instead of sticking + foot lock: a horizontal touchdown anchor
-                (soft) plus a frame-to-frame anti-slide penalty (soft), no Z pin.
-            stance_anchor_xy (dict[str, np.ndarray] | None, optional): Touchdown
-                anchors per foot link, {robot link name: (num_frames, 2) xy};
-                only read on stance frames of that side.
-            terra_anchor_weight (float): Weight of the touchdown xy anchor residual.
-            terra_antislide_weight (float): Weight of the anti-slide xy residual.
 
         Returns:
             tuple: (retargeted_motions, obj_pts_demo_list, obj_pts_list, tetrahedra)
@@ -607,11 +595,6 @@ class InteractionMeshRetargeter:
                     if body_anchor_targets
                     else None
                 )
-                stance_anchor_xy_i = (
-                    {link: tgt[i] for link, tgt in stance_anchor_xy.items()}
-                    if stance_anchor_xy
-                    else None
-                )
                 q, cost = self.iterate(
                     q_locked=q_locked_list[i],
                     q_n=q,
@@ -627,10 +610,6 @@ class InteractionMeshRetargeter:
                     frame_idx=i,
                     body_anchor_targets_i=anchor_i,
                     body_anchor_weight=body_anchor_weight,
-                    terra_stance=terra_stance,
-                    stance_anchor_xy_i=stance_anchor_xy_i,
-                    terra_anchor_weight=terra_anchor_weight,
-                    terra_antislide_weight=terra_antislide_weight,
                 )
                 if self.debug:
                     robot_link_positions = self._get_robot_link_positions(
@@ -724,10 +703,6 @@ class InteractionMeshRetargeter:
         frame_idx: int = 0,
         body_anchor_targets_i: dict[str, np.ndarray] | None = None,
         body_anchor_weight: float = 100.0,
-        terra_stance: bool = False,
-        stance_anchor_xy_i: dict[str, np.ndarray] | None = None,
-        terra_anchor_weight: float = 500.0,
-        terra_antislide_weight: float = 500.0,
     ):
         """The main function to solve a single iteration of the DiffIK problem.
         Args:
@@ -792,16 +767,15 @@ class InteractionMeshRetargeter:
         # Linear equality
         constraints += [cp.Constant(J_L[:, self.q_a_indices]) @ dqa - lap_var == -lap0_vec]
 
-        # Foot constraints (sticking + foot lock window Z pinning + TERRA stance)
-        apply_foot_sticking = (self.q_a_init_idx < 12) and self.activate_foot_sticking and not terra_stance
-        apply_foot_lock = (self.q_a_init_idx < 12) and self.foot_lock.enable and not terra_stance
-        apply_terra_stance = (self.q_a_init_idx < 12) and terra_stance
+        # Foot constraints (sticking + foot lock window Z pinning)
+        apply_foot_sticking = (self.q_a_init_idx < 12) and self.activate_foot_sticking
+        apply_foot_lock = (self.q_a_init_idx < 12) and self.foot_lock.enable
         foot_lock_residuals: list = []
-        terra_residuals: list = []
-        if apply_foot_sticking or apply_foot_lock or apply_terra_stance:
+        if apply_foot_sticking or apply_foot_lock:
             J_WF_dict, p_WF_dict, _ = self._calc_manipulator_jacobians(q, links=self.foot_links, obj_frame=False)
 
-            if apply_foot_sticking or apply_terra_stance:
+            # Foot sticking: constrain XY to stay near previous frame position
+            if apply_foot_sticking:
                 _, p_WF_t_last_dict, _ = self._calc_manipulator_jacobians(
                     q_t_last, links=self.foot_links, obj_frame=False
                 )
@@ -814,8 +788,6 @@ class InteractionMeshRetargeter:
                 if left_key is None or right_key is None:
                     raise ValueError("foot_sticking must include one left* and one right* key")
 
-            # Foot sticking: constrain XY to stay near previous frame position
-            if apply_foot_sticking:
                 for key, J_WF in J_WF_dict.items():
                     apply_left = ("left" in key) and foot_sticking[left_key]
                     apply_right = ("right" in key) and foot_sticking[right_key]
@@ -849,28 +821,6 @@ class InteractionMeshRetargeter:
                             Jz @ dqa >= z_delta - self.foot_lock.tolerance,
                             Jz @ dqa <= z_delta + self.foot_lock.tolerance,
                         ]
-
-            # TERRA stance contact (arXiv:2609.38653): during stance the foot
-            # is held by a HORIZONTAL anchor at its touchdown position
-            # (r_xy = p_xy(q) - a_i, soft) plus a frame-to-frame horizontal
-            # displacement penalty (anti-slide, soft). No Z pinning - the foot
-            # height is left to the placement anchors and the shape objective,
-            # which lets the heel unload naturally during push-off instead of
-            # forcing a flat-foot pin that rolls the (waistless) trunk.
-            if apply_terra_stance:
-                for key, J_WF in J_WF_dict.items():
-                    side = "left" if "left" in key else "right"
-                    side_key = left_key if side == "left" else right_key
-                    if not foot_sticking[side_key]:
-                        continue
-                    Jxy = J_WF[:2, self.q_a_indices]
-                    p_xy = p_WF_dict[key][:2]
-                    anchor_xy = stance_anchor_xy_i.get(key) if stance_anchor_xy_i else None
-                    if anchor_xy is not None:
-                        terra_residuals.append((terra_anchor_weight, Jxy, anchor_xy - p_xy))
-                    # Anti-slide: penalize horizontal movement vs the previous frame.
-                    p_prev_xy = p_WF_t_last_dict[key][:2]
-                    terra_residuals.append((terra_antislide_weight, Jxy, p_prev_xy - p_xy))
 
         # Non-penetration constraints. The demand is capped at
         # penetration_recovery_cap per iteration (TERRA's rho): without the cap
@@ -910,10 +860,6 @@ class InteractionMeshRetargeter:
         # Soft foot-lock anchor residuals collected above
         for Jz, z_delta in foot_lock_residuals:
             obj_terms.append(self.foot_lock.soft_weight * cp.sum_squares(Jz @ dqa - z_delta))
-
-        # TERRA stance residuals collected above: touchdown xy anchor + anti-slide
-        for weight, Jxy, delta in terra_residuals:
-            obj_terms.append(weight * cp.sum_squares(Jxy @ dqa - delta))
 
         # Direct placement anchors (root-relative retargeting): soft full-xyz
         # position residuals on selected links. The interaction mesh keeps the
@@ -1097,10 +1043,6 @@ class InteractionMeshRetargeter:
         frame_idx: int = 0,
         body_anchor_targets_i: dict[str, np.ndarray] | None = None,
         body_anchor_weight: float = 100.0,
-        terra_stance: bool = False,
-        stance_anchor_xy_i: dict[str, np.ndarray] | None = None,
-        terra_anchor_weight: float = 500.0,
-        terra_antislide_weight: float = 500.0,
     ):
         """Iterate the solver for multiple iterations."""
         last_cost = np.inf
@@ -1120,10 +1062,6 @@ class InteractionMeshRetargeter:
                 frame_idx=frame_idx,
                 body_anchor_targets_i=body_anchor_targets_i,
                 body_anchor_weight=body_anchor_weight,
-                terra_stance=terra_stance,
-                stance_anchor_xy_i=stance_anchor_xy_i,
-                terra_anchor_weight=terra_anchor_weight,
-                terra_antislide_weight=terra_antislide_weight,
             )
             if np.isclose(cost, last_cost):
                 break
