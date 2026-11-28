@@ -58,6 +58,28 @@ class FootLockConfig:
 
 
 @dataclass(frozen=True)
+class TerraStanceConfig:
+    """TERRA-style stance contact (arXiv:2609.38653), replacing sticking + foot lock.
+
+    During stance the foot is held by a HORIZONTAL anchor at its touchdown
+    position (r_xy = p_xy(q) - a_i, soft) plus a frame-to-frame horizontal
+    displacement penalty (anti-slide, soft). There is NO Z pinning: the foot
+    height is left to the placement anchors and the shape objective, so the
+    heel can unload naturally during push-off instead of a flat-foot pin that
+    rolls a waistless trunk. Compare against foot_lock.auto_from_stance.
+    """
+
+    enable: bool = False
+    """Use TERRA-style stance contact instead of sticking + foot lock."""
+
+    anchor_weight: float = 500.0
+    """Weight of the touchdown horizontal anchor residual per foot link."""
+
+    antislide_weight: float = 500.0
+    """Weight of the frame-to-frame horizontal displacement (anti-slide) penalty."""
+
+
+@dataclass(frozen=True)
 class SelfCollisionConfig:
     """Configuration for self-collision avoidance constraints."""
 
@@ -114,6 +136,10 @@ class RetargeterConfig:
 
     foot_lock: FootLockConfig = field(default_factory=FootLockConfig)
     """Configuration for explicit frame-range based foot locking."""
+
+    terra_stance: TerraStanceConfig = field(default_factory=TerraStanceConfig)
+    """TERRA-style stance contact (touchdown xy anchor + anti-slide, no Z pin).
+    When enabled, replaces sticking + foot lock during stance."""
 
     step_size: float = 0.2
     """Trust region for each SQP iteration."""
